@@ -187,6 +187,17 @@ select { padding-right: 8px; }
 .ev-clean { margin-top: 12px; font-size: 0.9rem; color: var(--low); border: 1px solid rgba(82, 192, 122, 0.35); background: rgba(82, 192, 122, 0.06); border-radius: 10px; padding: 10px 12px; }
 
 @media (max-width: 520px) { .ev-stats { grid-template-columns: 1fr; } }
+.ev-claim-src { font-size: 0.66rem; text-transform: uppercase; letter-spacing: 0.08em; color: var(--muted); margin-bottom: 4px; }
+
+/* ---------- challenge / adversarial chips ---------- */
+.samples.challenge { margin-top: 12px; }
+.samples.challenge .lbl { color: var(--high); }
+.chip-adv { border-color: rgba(255, 140, 66, 0.5); }
+.chip-adv:hover { border-color: var(--high); }
+
+/* ---------- what's not proven / what would settle it ---------- */
+.box.notproven h4 { color: var(--medium); }
+.box.wouldchange h4 { color: var(--accent); }
 
 .how { background: var(--panel-2); border: 1px solid var(--border); border-radius: 10px; padding: 14px; color: var(--text); }
 .how .name { font-weight: 650; color: var(--accent); }

@@ -163,6 +163,7 @@ class AnalysisResult(BaseModel):
     verdict: Verdict
     evidence_audit: EvidenceAudit = Field(default_factory=EvidenceAudit)
     rejected_claims: list[RejectedClaim] = Field(default_factory=list)
+    not_proven: list[str] = Field(default_factory=list)   # what the analysis can't confirm on its own
     action_plan: ActionPlan
     coverage_notes: list[str] = Field(default_factory=list)
     disclaimer: str = ""

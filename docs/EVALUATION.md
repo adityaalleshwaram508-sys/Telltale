@@ -92,7 +92,7 @@ loudly rather than silently.
 ## Unit tests
 
 ```bash
-python -m pytest -q        # 35 tests
+python -m pytest -q        # 40 tests
 ```
 
 [`tests/test_verify.py`](../tests/test_verify.py) covers the same grounding

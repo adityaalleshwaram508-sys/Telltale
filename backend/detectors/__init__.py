@@ -9,6 +9,7 @@ from backend.schemas import Entities, Signal
 
 from .contacts import analyze_contacts
 from .entities import extract_entities
+from .injection import analyze_injection
 from .language import analyze_language
 from .payments import analyze_payments
 from .urls import analyze_urls
@@ -21,6 +22,7 @@ def run_detectors(text: str) -> tuple[Entities, list[Signal]]:
     signals += analyze_payments(text, entities)
     signals += analyze_language(text)
     signals += analyze_contacts(text, entities)
+    signals += analyze_injection(text)
     return entities, signals
 
 

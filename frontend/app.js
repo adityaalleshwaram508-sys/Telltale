@@ -55,6 +55,16 @@ async function boot() {
       box.append(chip);
     }
   } catch (e) { /* ignore */ }
+
+  try {
+    const adv = await (await fetch("/api/adversarial")).json();
+    const box = $("#adversarial");
+    for (const s of adv) {
+      const chip = el("button", { class: "chip chip-adv", text: s.label });
+      chip.onclick = () => loadSampleAndRun(s.id);
+      box.append(chip);
+    }
+  } catch (e) { /* ignore */ }
 }
 
 function pill(on, name, val) {
@@ -68,6 +78,13 @@ async function loadSample(id) {
   $("#region").value = s.region_hint || "";
   clearFile();
   window.scrollTo({ top: 0, behavior: "smooth" });
+}
+
+// Challenge mode: load an adversarial example and run it immediately, so the
+// robustness (a look-alike caught, an injection treated as data) is one click away.
+async function loadSampleAndRun(id) {
+  await loadSample(id);
+  run();
 }
 
 // ---------- file ----------
@@ -295,11 +312,25 @@ function renderResult(r) {
     root.append(sec);
   }
 
-  if (ap.how_to_verify && ap.how_to_verify.length) {
-    const sec = section("How to verify for yourself");
-    const ul = el("ul", { class: "box" });
-    for (const s of ap.how_to_verify) ul.append(el("li", { text: s }));
-    sec.append(ul);
+  // what's not proven + what would change the verdict — the honest counterweight
+  // to the tells, so the verdict never reads as more certain than it is
+  const notProven = r.not_proven || [];
+  if (notProven.length || (ap.how_to_verify && ap.how_to_verify.length)) {
+    const sec = section("What's not proven — and what would change the verdict");
+    const cols = el("div", { class: "cols" });
+    if (notProven.length) {
+      const box = el("div", { class: "box notproven" }, el("h4", { text: "Telltale can’t confirm" }));
+      const ul = el("ul");
+      for (const s of notProven) ul.append(el("li", { text: s }));
+      box.append(ul); cols.append(box);
+    }
+    if (ap.how_to_verify && ap.how_to_verify.length) {
+      const box = el("div", { class: "box wouldchange" }, el("h4", { text: "What would settle it" }));
+      const ul = el("ul");
+      for (const s of ap.how_to_verify) ul.append(el("li", { text: s }));
+      box.append(ul); cols.append(box);
+    }
+    sec.append(cols);
     root.append(sec);
   }
 
@@ -384,11 +415,12 @@ function evidenceCheck(audit, rejected) {
       "The reasoning model proposed these — the evidence layer couldn’t back them, so they were dropped:" }));
     for (const claim of rejected) {
       const card = el("div", { class: "ev-claim" });
+      card.append(el("div", { class: "ev-claim-src", text: "Nemotron proposed" }));
       card.append(el("div", { class: "ev-claim-top" },
         el("span", { class: "ev-claim-title", text: claim.title || "Untitled claim" }),
-        el("span", { class: "ev-claim-badge", text: "rejected" }),
+        el("span", { class: "ev-claim-badge", text: "✗ rejected" }),
       ));
-      card.append(el("div", { class: "ev-claim-reason", text: sentence(claim.reason) }));
+      card.append(el("div", { class: "ev-claim-reason", text: "Reason: " + sentence(claim.reason) }));
       box.append(card);
     }
     sec.append(box);

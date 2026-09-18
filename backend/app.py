@@ -24,7 +24,7 @@ from fastapi.staticfiles import StaticFiles
 
 from backend.config import get_settings
 from backend.pipeline import analyze
-from backend.samples import DEMO_IDS, get_sample
+from backend.samples import DEMO_ADVERSARIAL_IDS, DEMO_IDS, get_sample
 from backend.schemas import AnalysisResult, AnalyzeRequest, StepEvent
 
 logger = logging.getLogger("telltale")
@@ -59,6 +59,17 @@ def health():
 @app.get("/api/samples")
 def list_samples():
     samples = [get_sample(i) for i in DEMO_IDS]
+    return [
+        {"id": s.id, "label": s.label, "kind": s.kind,
+         "region_hint": s.region_hint, "preview": s.text[:120] + "…"}
+        for s in samples if s
+    ]
+
+
+@app.get("/api/adversarial")
+def list_adversarial():
+    """The 'Challenge Telltale' set — messages built to defeat a naive classifier."""
+    samples = [get_sample(i) for i in DEMO_ADVERSARIAL_IDS]
     return [
         {"id": s.id, "label": s.label, "kind": s.kind,
          "region_hint": s.region_hint, "preview": s.text[:120] + "…"}

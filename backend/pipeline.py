@@ -99,6 +99,21 @@ def _heuristic_verdict(signals: list[Signal], floor: int) -> tuple[Verdict, list
     return reconcile_verdict(v, tells, floor), tells
 
 
+def _not_proven(entities: Entities, context: MessageContext) -> list[str]:
+    """The honest counterweight to the tells: things a message analysis, on its
+    own, genuinely can't establish. Surfaced so the verdict never overclaims
+    certainty, and so the user knows exactly what an independent check would settle.
+    """
+    items = ["Whether this was really sent by the party it claims to be from."]
+    if entities.domains or entities.urls:
+        items.append("Who actually owns the linked domain, or whether it's the official site.")
+    if entities.phones:
+        items.append("Whether the phone number truly belongs to the claimed sender.")
+    if entities.upi_ids or entities.crypto_addresses:
+        items.append("Who really controls the account the money would end up in.")
+    return items[:4]
+
+
 def _heuristic_action(a_name: str) -> ActionDraft:
     return ActionDraft(
         do_now=[],
@@ -272,6 +287,7 @@ async def analyze(
         verdict=verdict,
         evidence_audit=evidence_audit,
         rejected_claims=rejected_claims,
+        not_proven=_not_proven(entities, context),
         action_plan=action_plan,
         coverage_notes=coverage, disclaimer=DISCLAIMER,
     )

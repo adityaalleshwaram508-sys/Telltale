@@ -15,7 +15,7 @@ input ──┤── link ─────────────────�
                                   ┌───────────────────────────────────┐
                                   │ deterministic detectors (code)     │
                                   │  entities · urls · payments ·      │
-                                  │  language · contacts               │
+                                  │  language · contacts · injection   │
                                   └───────────────┬───────────────────┘
                                       signals + a transparent risk FLOOR
                                                   │

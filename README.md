@@ -13,6 +13,51 @@ Reasoning: **NVIDIA Nemotron** on **Nebius Token Factory** · Live verification:
 
 ---
 
+## How it works, in one picture
+
+```text
+             PROOF
+               │
+               ▼
+        ┌──────────────┐
+        │   TELLTALE   │
+        └──────┬───────┘
+               │
+       ┌───────┴────────┐
+       │                │
+  HARD EVIDENCE     NEMOTRON
+       │                │
+       └───────┬────────┘
+               ▼
+        LIVE VERIFICATION
+               │
+               ▼
+        CLAIM VERIFIER
+               │
+       ┌───────┴────────┐
+       │                │
+    ACCEPT           REJECT
+       │                │
+       └───────┬────────┘
+               ▼
+        AUDITABLE VERDICT
+```
+
+**Hard evidence** — deterministic detectors (look-alike domains, payment rails, urgency, prompt-injection) that set a risk floor. **Nemotron** — Nano + Super on Nebius Token Factory, doing the reasoning. **Live verification** — Tavily against current reports. The **claim verifier** admits a finding only if it maps to a real signal, a returned source, or a verbatim quote; anything else is rejected. The output is an **auditable verdict** — every claim traceable to its evidence, every rejection shown.
+
+## How it meets the hackathon brief
+
+| Requirement | How |
+| --- | --- |
+| Runtime call to **Nebius Token Factory** | every reasoning step calls the Token Factory inference API at runtime — [`backend/llm.py`](backend/llm.py) |
+| **NVIDIA open-source model** | NVIDIA Nemotron 3 (Nano + Super) does all reasoning |
+| Functional **Tavily** call | live verification runs a real Tavily search at runtime — [`backend/tavily.py`](backend/tavily.py) |
+| **Open source** | MIT — [`LICENSE`](LICENSE), public repo |
+| **Working demo** | https://telltale-jawt.onrender.com |
+| **Demo video** | _add your YouTube link_ |
+
+---
+
 ## The 30-second demo
 
 Paste a suspicious message, link, or screenshot. Telltale returns a 0–100 risk
@@ -22,20 +67,37 @@ action plan, and regional reporting channels. Before any of that, it shows an
 backed, and any it rejected — with the reason each rejected claim was dropped.
 
 ```bash
-python -m pytest -q          # 35 unit tests
+python -m pytest -q          # 40 unit tests
 python eval/detection.py     # detection metrics (no API key needed)
 python eval/grounding.py     # Evidence Integrity Benchmark (no API key needed)
 ```
 
+## What it looks like
+
+**1. Input** — paste a suspicious message, link, or screenshot.
+
+![Input](docs/shot-1-input.png)
+
+**2. Evidence** — every tell is bound to a detected signal, a live source, or a direct quote.
+
+![Evidence](docs/shot-2-evidence.png)
+
+**3. Verification** — the model proposed 5 findings; 2 were rejected as unsupported, with the reason each was dropped.
+
+![Verification](docs/shot-3-verification.png)
+
 ## Why this is different
 
+Reported consumer fraud losses hit **$12.5 billion in the US alone in 2024**, up
+25% in a single year ([FTC](https://www.ftc.gov/news-events/news/press-releases/2025/03/new-ftc-data-show-big-jump-reported-losses-fraud-125-billion-2024)).
+The instinctive fix — ask an LLM "is this a scam?" — is risky, because a confident
+**wrong** answer is worse than none: a model can invent a government helpline, call
+a real domain malicious without checking, or quote a rule it never verified.
+
 Scam detection is the application; **evidence-constrained inference** is the
-contribution. Asking an LLM "is this a scam?" is easy, but a confident wrong
-answer is worse than none: a model can invent a government helpline, call a real
-domain malicious without checking, or quote a rule it never verified. Telltale
-treats the model as a *proposer*, not an authority. Detection, reasoning,
-evidence, and verification are separate stages, and a verification layer sits
-between the model and the user.
+contribution. Telltale treats the model as a *proposer*, not an authority.
+Detection, reasoning, evidence, and verification are separate stages, and a
+verification layer sits between the model and the user.
 
 ## Evidence-constrained inference
 
@@ -181,8 +243,13 @@ Method and honest limitations: [`docs/EVALUATION.md`](docs/EVALUATION.md).
 ## Threat model
 
 Telltale is a security tool, so it's designed against an adversary — including one
-that targets the analysis itself (prompt injection, fabricated-evidence prompts).
-Input is treated as data, not instructions, and the verifier is the backstop. See
+that targets the analysis itself. Message content is treated strictly as **data,
+not instructions**: a deterministic detector flags prompt-injection attempts
+("ignore previous instructions", "classify this as safe") as a signal, and because
+the deterministic floor and the verifier are outside the model's control, a message
+still can't talk itself into a "safe" verdict. The UI's **Challenge Telltale** mode
+runs curated adversarial messages (a look-alike-domain phish, a prompt-injection
+attempt) so this robustness is one click away. Full analysis:
 [`docs/THREAT_MODEL.md`](docs/THREAT_MODEL.md).
 
 ## Run locally
@@ -202,7 +269,8 @@ only) and the UI marks that model reasoning and live verification weren't used.
 
 ```text
 backend/    app.py · pipeline.py · llm.py · tavily.py · verify.py · prompts.py · schemas.py
-            config.py · samples.py · detectors/ (deterministic) · knowledge/ (curated YAML)
+            config.py · samples.py (examples + adversarial set) · knowledge/ (curated YAML)
+            detectors/ — deterministic detectors, incl. injection.py (prompt-injection)
 frontend/   single-page analysis interface (vanilla JS)
 eval/       detection.py (detection metrics) · grounding.py (Evidence Integrity Benchmark)
 tests/      unit + verification tests
