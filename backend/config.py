@@ -6,7 +6,7 @@ here so the rest of the code never touches os.environ directly.
 Note the two vendor keys use their own names (NEBIUS_API_KEY, TAVILY_API_KEY) via
 validation_alias, while our own knobs use the TELLTALE_ prefix. That way a .env
 with the vendors' conventional names Just Works, whether it's parsed by
-pydantic-settings, exported by run.sh, or passed with docker --env-file.
+pydantic-settings, exported by scripts/run-dev.sh, or passed with docker --env-file.
 """
 from __future__ import annotations
 

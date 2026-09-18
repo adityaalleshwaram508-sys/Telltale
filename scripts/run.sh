@@ -1,9 +1,10 @@
 #!/usr/bin/env bash
-
-# Load local environment variables when running the app directly.
+#
+# Production server: no --reload, single worker. Loads .env if present.
+# This is what the Dockerfile and render.yaml effectively run.
 set -euo pipefail
 
-cd "$(dirname "$0")"
+cd "$(dirname "$0")/.."
 
 if [ -f .env ]; then
   set -a
@@ -12,6 +13,5 @@ if [ -f .env ]; then
 fi
 
 exec uvicorn backend.app:app \
-  --reload \
   --host 0.0.0.0 \
   --port "${PORT:-8000}"

@@ -18,13 +18,14 @@ behaviour honest and regression-checked.
 ## Reproduce
 
 ```bash
-python eval/run_eval.py     # detection metrics
-python eval/grounding.py    # evidence-grounding metrics
+python eval/detection.py    # detection metrics
+python eval/grounding.py    # evidence integrity benchmark
 ```
 
 Both run in **deterministic mode** by default (no `NEBIUS_API_KEY`), so anyone can
-reproduce the exact numbers below. With a key set, `run_eval.py` exercises the
-full Nemotron pipeline and recall/archetype accuracy improve.
+reproduce the exact numbers below. With a key set, `detection.py` exercises the
+full Nemotron pipeline and recall/archetype accuracy improve; the integrity
+benchmark is verifier-only and identical either way.
 
 ## Detection results (deterministic detectors only)
 
@@ -55,28 +56,43 @@ What this says, honestly:
 The takeaway is the split: code gives a high-precision floor you can trust; the
 model lifts recall on the cases that need interpretation.
 
-## Evidence-grounding results
+## Evidence Integrity Benchmark
 
-`eval/grounding.py` builds 11 tells against a real message and its real computed
-signals — 5 genuinely supported, 6 fabricated the way a model sometimes
-hallucinates (an invented signal id, a citation to a source that was never
-returned, quotes that don't appear in the message) — and runs them through the
-exact verifier the app uses:
+This is the benchmark that measures Telltale's actual contribution. Detection
+accuracy is a table stakes; the question that matters is whether the verifier
+holds the invariant *the model proposes, evidence decides* under adversarial
+pressure.
+
+`eval/grounding.py` constructs **100 adversarial claims** against a real message
+and its real computed signals — 25 fabricated signal references, 25 fabricated
+quotes, 20 fabricated citations, 15 out-of-taxonomy archetypes, and 15
+score-manipulation attempts — plus a **control set of 27 genuinely-grounded
+claims** that must survive. Every case runs through the exact functions the app
+uses (`verify_tells`, `verify_archetype`, `reconcile_verdict`). "Fabricated" is
+computed relative to the real substrate, so it always means *not actually
+present*, never merely *looks made up*.
 
 ```
-tells evaluated : 11 (5 supported, 6 fabricated)
-unsupported-claim rejection : 6/6 (100%)
-supported-claim retention   : 5/5 (100%)
+adversarial cases : 100 (70 fabricated claims, 15 bad archetypes, 15 score-manipulations)
+control cases     : 27 grounded claims
+
+Claim rejection rate    100%   70/70 fabricated claims rejected
+Signal grounding        100%   29/29 correct
+Quote fidelity          100%   35/35 correct
+Citation validity       100%   23/23 correct
+Archetype integrity     100%   15/15 bogus archetypes forced to 'none'
+Risk-floor violations   0      out of 15 score-manipulation attempts
+False rejections        0      genuinely-grounded claims wrongly dropped
 ```
 
-Every fabricated claim was dropped; every real one was kept. This is the
-measurable version of the product's core promise: **the model proposes, evidence
-decides.**
+These numbers are a property of the verification code, not a model run, so they're
+fully reproducible. If a future change weakens the verifier, this benchmark fails
+loudly rather than silently.
 
 ## Unit tests
 
 ```bash
-pytest        # 33 tests
+python -m pytest -q        # 35 tests
 ```
 
 [`tests/test_verify.py`](../tests/test_verify.py) covers the same grounding

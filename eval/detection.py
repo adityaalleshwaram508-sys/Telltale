@@ -8,7 +8,7 @@ Nemotron pipeline; without it, the deterministic detectors only (which is what
 the committed numbers in docs/evaluation.md are measured on, so they're
 reproducible by anyone without a key).
 
-    python eval/run_eval.py
+    python eval/detection.py
 """
 from __future__ import annotations
 

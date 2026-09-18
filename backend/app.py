@@ -13,6 +13,8 @@ from __future__ import annotations
 
 import base64
 import json
+import logging
+import uuid
 from pathlib import Path
 
 from fastapi import FastAPI, File, Form, UploadFile
@@ -24,6 +26,8 @@ from backend.config import get_settings
 from backend.pipeline import analyze
 from backend.samples import DEMO_IDS, get_sample
 from backend.schemas import AnalysisResult, AnalyzeRequest, StepEvent
+
+logger = logging.getLogger("telltale")
 
 app = FastAPI(title="Telltale", version="0.1.0")
 
@@ -106,9 +110,14 @@ async def analyze_stream(
                     yield _sse({"type": "step", **item.model_dump()})
                 elif isinstance(item, AnalysisResult):
                     yield _sse({"type": "result", "result": item.model_dump()})
-        except Exception as e:  # last-resort guard so the stream always closes cleanly
+        except Exception:  # last-resort guard so the stream always closes cleanly
+            # Don't leak internal exception details to the client. Log the real
+            # error server-side against a short run id the user can quote.
+            run_id = uuid.uuid4().hex[:8]
+            logger.exception("analysis failed (run_id=%s)", run_id)
             yield _sse({"type": "step", "step": "error", "status": "error",
-                        "message": f"Analysis failed: {e}", "data": None})
+                        "message": f"Analysis failed. Please retry. Reference: {run_id}",
+                        "data": None})
 
     return StreamingResponse(gen(), media_type="text/event-stream",
                              headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})

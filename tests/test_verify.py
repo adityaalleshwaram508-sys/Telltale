@@ -60,3 +60,25 @@ def test_score_cannot_fall_below_deterministic_floor():
 def test_score_is_clamped_to_100():
     v = Verdict(risk_level=RiskLevel.critical, score=250, headline="x", tells=[], reasoning="…")
     assert reconcile_verdict(v, [], floor=0).score == 100
+
+
+def test_unsupported_quote_cannot_survive():
+    """A tell that quotes words the user never wrote is rejected — the model can't
+    put language into the victim's mouth to justify a verdict."""
+    tell = Tell(title="Invented demand", explanation="…", evidence_type="quote",
+                evidence_ref="quote", quote="send your Aadhaar number and OTP immediately")
+    kept, rejected = verify_tells([tell], SIGNALS, SOURCES, MESSAGE)
+    assert kept == [] and len(rejected) == 1
+    assert rejected[0].evidence_type == "quote"
+    assert "message" in rejected[0].reason
+
+
+def test_model_cannot_lower_verified_risk_floor():
+    """When the model returns a score below the deterministic floor, the verdict is
+    pulled up to the floor exactly and the band raised to match — the model cannot
+    talk the risk down below what the hard evidence already justifies."""
+    v = Verdict(risk_level=RiskLevel.info, score=3, headline="looks fine",
+                tells=[], reasoning="…")
+    fixed = reconcile_verdict(v, [], floor=70)
+    assert fixed.score == 70                    # pulled up to the floor, not left at 3
+    assert fixed.risk_level == RiskLevel.high   # band raised to match the clamped score
