@@ -1,0 +1,129 @@
+# Commonly impersonated brands and their genuine domains.
+#
+# Two uses:
+#   1. If a message claims to be from a brand but every link points somewhere
+#      else, that's a contact/link mismatch signal.
+#   2. If a link's domain is a near-miss of a genuine domain (edit distance /
+#      homoglyph), that's a look-alike signal.
+#
+# Not exhaustive — it doesn't need to be. It just needs to cover the names that
+# scammers lean on most, weighted toward global services plus India (our first
+# target market).
+
+brands:
+  # Banks / payments
+  - name: PayPal
+    domains: [paypal.com]
+    keywords: [paypal]
+  - name: State Bank of India
+    domains: [onlinesbi.sbi, sbi.co.in]
+    keywords: [sbi, state bank]
+  - name: HDFC Bank
+    domains: [hdfcbank.com]
+    keywords: [hdfc]
+  - name: ICICI Bank
+    domains: [icicibank.com]
+    keywords: [icici]
+  - name: Axis Bank
+    domains: [axisbank.com]
+    keywords: [axis bank]
+  - name: Chase
+    domains: [chase.com]
+    keywords: [chase]
+  - name: Bank of America
+    domains: [bankofamerica.com]
+    keywords: [bank of america, bofa]
+
+  # Wallets / UPI
+  - name: Paytm
+    domains: [paytm.com]
+    keywords: [paytm]
+  - name: PhonePe
+    domains: [phonepe.com]
+    keywords: [phonepe]
+  - name: Google Pay
+    domains: [pay.google.com, gpay.app]
+    keywords: [google pay, gpay]
+
+  # Big tech / accounts
+  - name: Apple
+    domains: [apple.com, icloud.com]
+    keywords: [apple, icloud, apple id]
+  - name: Microsoft
+    domains: [microsoft.com, live.com, outlook.com]
+    keywords: [microsoft, windows, outlook]
+  - name: Google
+    domains: [google.com, gmail.com]
+    keywords: [google, gmail]
+  - name: Meta / Facebook
+    domains: [facebook.com, meta.com, instagram.com]
+    keywords: [facebook, instagram, meta]
+  - name: WhatsApp
+    domains: [whatsapp.com]
+    keywords: [whatsapp]
+  - name: Netflix
+    domains: [netflix.com]
+    keywords: [netflix]
+  - name: Amazon
+    domains: [amazon.com, amazon.in]
+    keywords: [amazon]
+
+  # Couriers / logistics
+  - name: FedEx
+    domains: [fedex.com]
+    keywords: [fedex]
+  - name: DHL
+    domains: [dhl.com]
+    keywords: [dhl]
+  - name: India Post
+    domains: [indiapost.gov.in]
+    keywords: [india post, speed post]
+  - name: Blue Dart
+    domains: [bluedart.com]
+    keywords: [blue dart, bluedart]
+  - name: USPS
+    domains: [usps.com]
+    keywords: [usps]
+
+  # Government-ish (heavily impersonated in authority scams)
+  - name: Income Tax India
+    domains: [incometax.gov.in]
+    keywords: [income tax, it department]
+  - name: TRAI
+    domains: [trai.gov.in]
+    keywords: [trai, telecom regulatory]
+  - name: IRS
+    domains: [irs.gov]
+    keywords: [irs, internal revenue]
+  - name: Social Security (SSA)
+    domains: [ssa.gov]
+    keywords: [social security, ssa]
+
+# Payment-app / wallet keywords used to spot when someone is being pushed onto a
+# hard-to-reverse rail. Feeds the payments detector.
+suspicious_tlds:
+  - .top
+  - .xyz
+  - .rest
+  - .club
+  - .online
+  - .site
+  - .live
+  - .buzz
+  - .cfd
+  - .sbs
+  - .work
+  - .zip
+  - .mov
+
+url_shorteners:
+  - bit.ly
+  - tinyurl.com
+  - t.co
+  - goo.gl
+  - is.gd
+  - cutt.ly
+  - rb.gy
+  - shorturl.at
+  - t.ly
+  - rebrand.ly

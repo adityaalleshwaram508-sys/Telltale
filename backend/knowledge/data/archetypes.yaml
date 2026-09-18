@@ -1,0 +1,293 @@
+# Scam archetype taxonomy.
+#
+# This is Telltale's ground truth for "what con is this and how does it work".
+# The model is allowed to CLASSIFY an input into one of these ids and to reuse
+# the how_it_works text, but it can't invent an archetype that isn't here.
+#
+# Each entry:
+#   id            stable slug, referenced by the classifier and the verdict
+#   name          display name
+#   aliases       other names people search for
+#   how_it_works  2-3 sentences, plain English, safe to show a victim
+#   signature_tells  the concrete giveaways graders/victims can check
+#   channels      where it usually arrives
+#   payment_rails how the money is pulled out (empty if not money-first)
+#   regions       "global" or ISO-2 hotspots
+#   refs          authoritative sources (name + url) — shown as the basis, never invented
+
+archetypes:
+  - id: phishing_account
+    name: Account / credential phishing
+    aliases: [phishing, account suspended, verify your account, password reset]
+    how_it_works: >
+      A message pretends to be a service you use (bank, email, Netflix, a courier)
+      and warns that your account is locked, will be closed, or has a problem. It
+      pushes you to a link that looks official but leads to a fake login page that
+      captures whatever you type.
+    signature_tells:
+      - Urgent threat about your account being suspended or closed
+      - A link whose domain isn't the real company's domain
+      - Generic greeting instead of your name
+      - Asks you to "verify", "confirm", or "re-activate" by logging in via the link
+    channels: [email, sms, whatsapp, social_dm]
+    payment_rails: []
+    regions: global
+    refs:
+      - name: FTC — Phishing scams
+        url: https://consumer.ftc.gov/articles/how-recognize-and-avoid-phishing-scams
+
+  - id: impersonation_authority
+    name: Government / police impersonation
+    aliases: [digital arrest, tax scam, customs, police, arrest warrant, FedEx customs]
+    how_it_works: >
+      The caller or message claims to be the police, a tax authority, customs, or a
+      telecom regulator, and says you're linked to a crime, money laundering, or an
+      illegal parcel. They manufacture fear, keep you on the line, and demand money
+      or remote access to "clear your name". A real agency never arrests or fines you
+      over a phone call, video call, or chat.
+    signature_tells:
+      - Threat of immediate arrest, deportation, licence cancellation, or a frozen account
+      - Instruction to stay on the call and not talk to family or your bank
+      - A "case number", fake ID card, or a video call from someone in uniform
+      - Demand to move money to a "safe account" for "verification"
+    channels: [call_transcript, whatsapp, sms, video_call]
+    payment_rails: [wire, upi, bank_transfer, crypto, gift_card]
+    regions: [IN, US, global]
+    refs:
+      - name: RBI — Beware of digital arrest and related frauds
+        url: https://www.rbi.org.in
+      - name: India — National Cyber Crime Reporting Portal
+        url: https://www.cybercrime.gov.in
+      - name: FTC — Government impersonator scams
+        url: https://consumer.ftc.gov/articles/how-avoid-government-impersonation-scam
+
+  - id: tech_support
+    name: Tech-support scam
+    aliases: [virus warning, Microsoft support, refund for antivirus, AnyDesk]
+    how_it_works: >
+      A pop-up, call, or email claims your device is infected or that a subscription
+      auto-renewed. They talk you into installing remote-access software (AnyDesk,
+      TeamViewer, UltraViewer) so they can "fix" it — then drain accounts or fake a
+      refund overpayment you must return.
+    signature_tells:
+      - Unsolicited "your computer is infected" warning with a phone number
+      - Asks you to install a remote-access / screen-sharing app
+      - A "refund" that was supposedly overpaid and must be returned
+    channels: [website, call_transcript, email]
+    payment_rails: [gift_card, wire, bank_transfer]
+    regions: global
+    refs:
+      - name: FTC — Tech support scams
+        url: https://consumer.ftc.gov/articles/how-spot-avoid-and-report-tech-support-scams
+
+  - id: investment_crypto
+    name: Investment / crypto "pig butchering"
+    aliases: [pig butchering, fake trading platform, guaranteed returns, forex, task trading]
+    how_it_works: >
+      After a friendly chat (often a wrong-number text or a dating app), someone
+      introduces a "can't-lose" trading or crypto platform. Small early withdrawals
+      work to build trust; then you're pushed to invest more, and when you try to
+      cash out you're hit with "taxes" or "fees" that never end.
+    signature_tells:
+      - Promises of guaranteed or unusually high, fast returns
+      - A stranger who moves the chat off-platform and mentions their own success
+      - A slick app or site you can only reach through their link
+      - Fees or "taxes" demanded before you can withdraw
+    channels: [whatsapp, social_dm, sms, website]
+    payment_rails: [crypto, wire, bank_transfer]
+    regions: global
+    refs:
+      - name: FBI IC3 — Cryptocurrency investment fraud
+        url: https://www.ic3.gov
+      - name: FTC — Investment scams
+        url: https://consumer.ftc.gov/articles/what-know-about-investment-scams
+
+  - id: job_task
+    name: Fake job / task scam
+    aliases: [work from home, part time job, task based, like and earn, prepaid job fee]
+    how_it_works: >
+      An unsolicited offer promises easy money for simple tasks (liking videos,
+      rating products, data entry). Tiny payments arrive first; then you're asked to
+      deposit your own money to "unlock" bigger commissions, and the payouts stop.
+      Legitimate employers don't ask you to pay to work.
+    signature_tells:
+      - Unsolicited job offer over WhatsApp/Telegram with vague duties
+      - Small initial payments to build trust
+      - Any request to pay a deposit, fee, or "recharge" to earn or withdraw
+      - Salary far above what the task could justify
+    channels: [whatsapp, sms, social_dm, email]
+    payment_rails: [upi, crypto, bank_transfer]
+    regions: [IN, global]
+    refs:
+      - name: FTC — Job scams
+        url: https://consumer.ftc.gov/articles/job-scams
+      - name: India — National Cyber Crime Reporting Portal
+        url: https://www.cybercrime.gov.in
+
+  - id: prize_lottery
+    name: Prize / lottery / "you won" scam
+    aliases: [lottery, you won, lucky winner, KBC lottery, gift claim]
+    how_it_works: >
+      You're told you've won a lottery, a phone, or a big prize you never entered.
+      To "release" it you must first pay a processing fee, tax, or customs charge.
+      The prize doesn't exist; the fee is the scam.
+    signature_tells:
+      - You "won" something you never entered
+      - A fee, tax, or charge required before you can claim
+      - Pressure to claim within hours
+    channels: [sms, whatsapp, email, call_transcript]
+    payment_rails: [upi, gift_card, wire, bank_transfer]
+    regions: global
+    refs:
+      - name: FTC — Prize and lottery scams
+        url: https://consumer.ftc.gov/articles/fake-prize-sweepstakes-and-lottery-scams
+
+  - id: advance_fee
+    name: Advance-fee fraud
+    aliases: [419, inheritance, beneficiary, fund transfer, loan approval fee]
+    how_it_works: >
+      You're promised a large sum — an inheritance, a business deal, a guaranteed
+      loan — if you first cover a small upfront cost like a fee, bribe, or "clearance
+      charge". Each payment unlocks a new obstacle that needs another payment.
+    signature_tells:
+      - A large future payout in exchange for a small upfront fee
+      - A story that needs your bank account or documents to "process funds"
+      - New fees appearing each time you pay
+    channels: [email, whatsapp, sms]
+    payment_rails: [wire, bank_transfer, crypto, gift_card]
+    regions: global
+    refs:
+      - name: FBI IC3 — Common scams
+        url: https://www.ic3.gov
+
+  - id: refund_overpayment
+    name: Refund / overpayment scam
+    aliases: [overpaid refund, accidental transfer, return the extra, subscription refund]
+    how_it_works: >
+      You're told you're owed a refund, or that someone "accidentally" sent you extra
+      money. They ask you to return the difference — sometimes after showing a faked
+      deposit screenshot — before the original payment reverses or is revealed as fake.
+    signature_tells:
+      - A refund larger than expected, with a request to send some back
+      - Pressure to return money quickly before you can confirm the deposit cleared
+      - A screenshot of a payment instead of money actually in your account
+    channels: [email, call_transcript, whatsapp]
+    payment_rails: [gift_card, upi, wire, bank_transfer]
+    regions: global
+    refs:
+      - name: FTC — Refund and recovery scams
+        url: https://consumer.ftc.gov/articles/refund-and-recovery-scams
+
+  - id: delivery_package
+    name: Delivery / courier scam
+    aliases: [package pending, redelivery fee, customs charge, parcel held, India Post]
+    how_it_works: >
+      A text says a package is held for a small unpaid fee or customs charge and links
+      to a page that harvests your card details. Sometimes it escalates into a fake
+      customs/police call about an "illegal" parcel in your name.
+    signature_tells:
+      - Unexpected "delivery failed / fee due" text with a link
+      - A tiny fee demanded to release a parcel
+      - Link domain that isn't the real courier's site
+    channels: [sms, whatsapp, email]
+    payment_rails: [bank_transfer, upi]
+    regions: global
+    refs:
+      - name: FTC — Package delivery scams
+        url: https://consumer.ftc.gov/consumer-alerts
+
+  - id: family_emergency
+    name: Family emergency / impersonation
+    aliases: [grandparent scam, stuck abroad, accident, bail money, hi mum]
+    how_it_works: >
+      A message or call claims a loved one is in trouble — an accident, an arrest, a
+      lost phone — and needs money now. Increasingly the "new number" or even a cloned
+      voice is used. The urgency is designed to stop you from checking.
+    signature_tells:
+      - Claims to be a loved one on a new number after "losing their phone"
+      - Urgent money request tied to an emergency you can't verify
+      - Pressure not to call the person's usual number
+    channels: [whatsapp, sms, call_transcript]
+    payment_rails: [upi, wire, gift_card, bank_transfer]
+    regions: global
+    refs:
+      - name: FTC — Family emergency scams
+        url: https://consumer.ftc.gov/articles/scammers-use-fake-emergencies-steal-your-money
+
+  - id: loan_app
+    name: Predatory instant-loan app
+    aliases: [instant loan, loan app harassment, processing fee loan, quick cash app]
+    how_it_works: >
+      An app or message offers an instant loan with no checks. Either a "processing
+      fee" is demanded before any loan arrives, or a real but tiny loan is granted so
+      the app can harvest your contacts and photos and later extort you.
+    signature_tells:
+      - Loan approved with no documents or credit check
+      - An upfront processing/GST/insurance fee before disbursal
+      - App demands access to contacts, gallery, and messages
+    channels: [sms, whatsapp, website]
+    payment_rails: [upi, bank_transfer]
+    regions: [IN, global]
+    refs:
+      - name: RBI — Cautions on unauthorised lending apps
+        url: https://www.rbi.org.in
+      - name: India — National Cyber Crime Reporting Portal
+        url: https://www.cybercrime.gov.in
+
+  - id: marketplace
+    name: Marketplace / classifieds scam
+    aliases: [OLX, army officer buyer, QR code payment, advance for rental, second-hand]
+    how_it_works: >
+      On a buy/sell platform the other party is too eager. A "buyer" sends a QR code or
+      a collect-request claiming it will pay you — but scanning it or approving it
+      takes money from you. A "seller" or "landlord" wants a deposit before you can
+      see the item or flat.
+    signature_tells:
+      - Being asked to scan a QR code or approve a request to RECEIVE money
+      - A buyer/seller in a hurry who won't meet or verify
+      - Deposit demanded for a rental or item you haven't seen
+    channels: [whatsapp, sms, website, social_dm]
+    payment_rails: [upi, bank_transfer]
+    regions: [IN, global]
+    refs:
+      - name: India — National Cyber Crime Reporting Portal
+        url: https://www.cybercrime.gov.in
+
+  - id: otp_upi
+    name: OTP / UPI PIN theft
+    aliases: [share otp, upi pin, collect request, refund to upi, kyc update]
+    how_it_works: >
+      The core trick: no legitimate bank, wallet, or company ever needs your OTP, UPI
+      PIN, or card CVV. Scammers invent a reason — a refund, a KYC update, a reward —
+      to get you to read out an OTP or enter your UPI PIN, which authorises a payment
+      OUT of your account.
+    signature_tells:
+      - Anyone asking you to share an OTP, UPI PIN, CVV, or password
+      - Being told to enter your PIN to RECEIVE money (a PIN only ever sends money)
+      - A KYC/reward/refund pretext for collecting a code
+    channels: [call_transcript, sms, whatsapp]
+    payment_rails: [upi, bank_transfer]
+    regions: [IN, global]
+    refs:
+      - name: RBI — Never share OTP/PIN/CVV
+        url: https://www.rbi.org.in
+      - name: India — National Cyber Crime Reporting Portal
+        url: https://www.cybercrime.gov.in
+
+  - id: business_invoice
+    name: Invoice / business email compromise
+    aliases: [BEC, changed bank details, vendor fraud, CEO fraud, updated account]
+    how_it_works: >
+      A supplier or executive emails to say their bank details have changed, or an
+      invoice is due, and asks you to pay a new account. The email address is spoofed
+      or look-alike, and the money lands with the fraudster.
+    signature_tells:
+      - A supplier/boss suddenly changing bank details by email
+      - Slight misspelling in the sender's domain
+      - Pressure to pay quickly and quietly, bypassing normal checks
+    channels: [email]
+    payment_rails: [wire, bank_transfer]
+    regions: global
+    refs:
+      - name: FBI IC3 — Business email compromise
+        url: https://www.ic3.gov

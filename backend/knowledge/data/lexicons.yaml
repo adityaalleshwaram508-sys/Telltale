@@ -1,0 +1,215 @@
+# Language-signal lexicons.
+#
+# These feed a simple, transparent phrase matcher (detectors/language.py). It is
+# deliberately NOT a model — a match is a fact ("this phrase appears here") that
+# we can point at, which is exactly what keeps the verdict honest. The model gets
+# to interpret; the matcher only reports what's literally present.
+#
+# Phrases are matched case-insensitively as substrings. A few Hindi/Hinglish
+# terms are included because a lot of scams targeting India arrive that way.
+#
+# severity: 0-3, how strongly the category nudges the risk score.
+
+lexicons:
+  - id: language.urgency
+    label: Manufactured urgency
+    severity: 1
+    terms:
+      - act now
+      - immediately
+      - within 24 hours
+      - within 2 hours
+      - last chance
+      - expires today
+      - urgent
+      - hurry
+      - right now
+      - before it's too late
+      - account will be closed
+      - account will be suspended
+      - final notice
+      - turant
+      - abhi
+
+  - id: language.threat
+    label: Threat or intimidation
+    severity: 2
+    terms:
+      - arrest
+      - arrest warrant
+      - legal action
+      - lawsuit
+      - police
+      - fir will be filed
+      - court
+      - deportation
+      - your account has been frozen
+      - blocked permanently
+      - penalty
+      - fine
+      - jail
+      - non-bailable
+      - money laundering
+      - illegal parcel
+
+  - id: language.secrecy
+    label: Pressure to keep it secret / stay on the line
+    severity: 2
+    terms:
+      - do not tell anyone
+      - don't tell anyone
+      - do not tell your family
+      - don't tell your family
+      - keep this confidential
+      - do not disconnect
+      - stay on the line
+      - stay on this call
+      - stay on the call
+      - do not hang up
+      - don't inform your bank
+      - between us
+      - confidential matter
+
+  - id: language.too_good
+    label: Too good to be true
+    severity: 2
+    terms:
+      - guaranteed returns
+      - guaranteed profit
+      - guaranteed
+      - risk free
+      - double your money
+      - you have won
+      - you've won
+      - congratulations you
+      - lucky winner
+      - free gift
+      - claim your prize
+      - lottery
+      - 100% profit
+      - no risk
+      - earn from home
+      - work from home earn
+
+  - id: language.recruitment_bait
+    label: Unsolicited "easy money" job bait
+    severity: 2
+    terms:
+      - part time job
+      - part-time job
+      - part time online job
+      - work from home
+      - recruitment team
+      - hiring team
+      - per task
+      - daily income
+      - high commission
+      - unlock the
+      - ghar baithe
+      - daily kamao
+
+  - id: language.credentials
+    label: Asks for a secret code or credential
+    severity: 3
+    terms:
+      - share otp
+      - send otp
+      - tell me the otp
+      - enter your otp
+      - upi pin
+      - enter upi pin
+      - cvv
+      - card number
+      - expiry date
+      - net banking password
+      - login password
+      - mpin
+      - verification code
+
+  - id: language.remote_access
+    label: Wants remote access to your device
+    severity: 3
+    terms:
+      - anydesk
+      - teamviewer
+      - ultraviewer
+      - quicksupport
+      - install this app
+      - screen share
+      - screen sharing
+      - remote access
+      - download the app to fix
+
+  - id: language.off_platform
+    label: Moves you off the platform / onto a new number
+    severity: 1
+    terms:
+      - contact me on whatsapp
+      - message me on telegram
+      - my new number
+      - this is my new number
+      - i lost my phone
+      - add me on telegram
+      - dm me
+      - text me on
+      - wrong number
+      - only works through me
+      - link only works
+
+  - id: language.payment_push
+    label: Pushes an immediate payment
+    severity: 2
+    terms:
+      - pay the fee
+      - processing fee
+      - clearance fee
+      - customs charge
+      - refundable deposit
+      - security deposit
+      - pay to release
+      - recharge to withdraw
+      - registration fee
+      - gst charge
+      - convenience fee
+      - pay a small amount
+      - tax fee
+      - withdrawal fee
+      - small fee
+      - deposit of
+      - return the extra
+      - overpaid
+      - sent too much
+
+  - id: language.tech_bait
+    label: Fake infection / tech-support hook
+    severity: 2
+    terms:
+      - virus detected
+      - detected a virus
+      - computer is infected
+      - device is infected
+      - your account has been compromised
+      - we detected suspicious activity
+
+  - id: language.loan_bait
+    label: Predatory instant-loan hook
+    severity: 2
+    terms:
+      - instant loan
+      - loan approved
+      - no credit check
+      - no documents
+      - gallery access
+      - contacts access
+      - allow contacts
+
+  - id: language.advance_fee_bait
+    label: Advance-fee / beneficiary hook
+    severity: 2
+    terms:
+      - beneficiary
+      - next of kin
+      - inheritance
+      - unclaimed funds
+      - selected as the winner
+      - you have been chosen

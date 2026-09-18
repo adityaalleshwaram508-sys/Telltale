@@ -1,0 +1,86 @@
+# Official reporting channels, by region.
+#
+# These are shown to the user in the action plan. They are curated (not model
+# output) so the phone numbers and URLs are real. Keyed by ISO-2 country code,
+# plus a "global" fallback that always applies.
+#
+# When the region is known we surface that country's channels first, then the
+# universal steps (contact your bank / payment provider immediately).
+
+regions:
+  IN:
+    - name: National Cyber Crime Helpline (1930)
+      phone: "1930"
+      url: https://www.cybercrime.gov.in
+      note: >
+        Call 1930 immediately for financial fraud — the sooner you report, the
+        better the chance funds can be put on hold ("golden hour"). You'll get a
+        14-digit acknowledgement number, then complete the complaint on the portal.
+      source: https://www.cybercrime.gov.in
+    - name: National Cyber Crime Reporting Portal
+      url: https://www.cybercrime.gov.in
+      note: File a detailed complaint online; use the "Report Financial Fraud" flow for money lost.
+      source: https://www.cybercrime.gov.in
+
+  US:
+    - name: FTC — ReportFraud
+      url: https://reportfraud.ftc.gov
+      note: The FTC's official place to report scams and fraud.
+      source: https://consumer.ftc.gov
+    - name: FBI Internet Crime Complaint Center (IC3)
+      url: https://www.ic3.gov
+      note: Report internet-enabled crime and financial fraud, especially larger losses.
+      source: https://www.ic3.gov
+
+  GB:
+    - name: Action Fraud
+      phone: "0300 123 2040"
+      url: https://www.actionfraud.police.uk
+      note: The UK's national reporting centre for fraud and cybercrime (England, Wales, NI).
+      source: https://www.actionfraud.police.uk
+    - name: Call 159 (Stop Scams UK)
+      phone: "159"
+      note: If a call claims to be your bank, hang up and dial 159 to reach your bank safely.
+      source: https://stopscamsuk.org.uk
+
+  AU:
+    - name: Scamwatch (National Anti-Scam Centre)
+      url: https://www.scamwatch.gov.au
+      note: Report scams to Australia's National Anti-Scam Centre.
+      source: https://www.scamwatch.gov.au
+    - name: ReportCyber
+      url: https://www.cyber.gov.au/report
+      note: Report cybercrime to the Australian Cyber Security Centre.
+      source: https://www.cyber.gov.au
+
+  CA:
+    - name: Canadian Anti-Fraud Centre
+      phone: "1-888-495-8501"
+      url: https://antifraudcentre-centreantifraude.ca
+      note: Canada's central agency for collecting fraud reports.
+      source: https://antifraudcentre-centreantifraude.ca
+
+  SG:
+    - name: ScamShield / Police Anti-Scam Helpline
+      phone: "1799"
+      url: https://www.scamshield.gov.sg
+      note: Singapore's anti-scam helpline and resources.
+      source: https://www.scamshield.gov.sg
+
+# Applies everywhere, appended after any country-specific channels.
+global:
+  - name: Your bank or payment provider
+    note: >
+      Contact your bank/card/wallet through the number on the back of your card or
+      the official app — not any number from the suspicious message — and ask them
+      to stop or reverse the payment and secure your account.
+    source: https://consumer.ftc.gov/articles/what-do-if-you-were-scammed
+  - name: The real company being impersonated
+    note: >
+      Reach the genuine organisation through its official website or app to check
+      whether the message was real and to report the impersonation.
+    source: https://consumer.ftc.gov/articles/how-recognize-and-avoid-phishing-scams
+  - name: eConsumer.gov (cross-border)
+    url: https://econsumer.gov
+    note: For international scams, report at econsumer.gov so the right authorities are alerted.
+    source: https://econsumer.gov

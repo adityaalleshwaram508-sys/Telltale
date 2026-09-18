@@ -1,0 +1,11 @@
+.env
+__pycache__/
+*.pyc
+.pytest_cache/
+.venv/
+venv/
+.DS_Store
+*.egg-info/
+.coverage
+htmlcov/
+node_modules/
