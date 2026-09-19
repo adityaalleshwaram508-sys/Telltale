@@ -1,5 +1,9 @@
 # Telltale
 
+[![CI](https://github.com/adityaalleshwaram508-sys/Telltale/actions/workflows/ci.yml/badge.svg)](https://github.com/adityaalleshwaram508-sys/Telltale/actions/workflows/ci.yml)
+&nbsp;[![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
+&nbsp;[![Python 3.11](https://img.shields.io/badge/python-3.11-blue.svg)](https://www.python.org/)
+
 **An evidence-constrained fraud-analysis pipeline.** A language model may propose a
 claim, but no claim reaches the user unless it can be grounded in the observed
 input, a deterministic signal, or retrieved evidence — and the model can never
@@ -74,15 +78,15 @@ python eval/grounding.py     # Evidence Integrity Benchmark (no API key needed)
 
 ## What it looks like
 
-**1. Input** — paste a suspicious message, link, or screenshot.
+**1. Input** — paste a suspicious message, link, or screenshot, or try a built-in example (including the adversarial "Challenge Telltale" set).
 
 ![Input](docs/shot-1-input.png)
 
-**2. Evidence** — every tell is bound to a detected signal, a live source, or a direct quote.
+**2. Evidence** — every tell is bound to a detected signal, a live Tavily source, or a direct quote.
 
 ![Evidence](docs/shot-2-evidence.png)
 
-**3. Verification** — the model proposed 5 findings; 2 were rejected as unsupported, with the reason each was dropped.
+**3. Verification** — the Evidence check on every result: how many findings the model proposed, how many the evidence backed, and any it couldn't (rejected, with the reason). Here all five were backed; the verifier's rejection behaviour is measured reproducibly in the [Evidence Integrity Benchmark](docs/EVALUATION.md).
 
 ![Verification](docs/shot-3-verification.png)
 

@@ -1,0 +1,34 @@
+name: CI
+
+# Runs the unit tests and both evaluation gates on every push and PR. No API key
+# is needed: the tests stub the model, and the evals run in deterministic mode —
+# so a green check here verifies the safety layer, not a lucky model call.
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  verify:
+    name: tests + evidence checks
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Unit tests
+        run: python -m pytest -q
+
+      - name: Detection eval (gates on 0 false positives)
+        run: python eval/detection.py
+
+      - name: Evidence Integrity Benchmark (gates on 100% claim rejection, 0 floor violations)
+        run: python eval/grounding.py
