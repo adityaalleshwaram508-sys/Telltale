@@ -1,14 +1,10 @@
-"""The analysis pipeline.
+"""Analysis pipeline and deterministic fallbacks."""
 
-An async generator that yields StepEvents as it goes (so the UI can narrate the
-work) and finishes by emitting the assembled AnalysisResult. Each model step is
-wrapped so a failure degrades to a deterministic fallback and a coverage note
-rather than a 500 — the deterministic detectors alone are enough to give a
-useful, honest answer if the model or the network is down.
-"""
 from __future__ import annotations
 
+import hashlib
 import re
+from collections import OrderedDict
 from collections.abc import AsyncIterator
 
 from backend.config import get_settings
@@ -16,272 +12,598 @@ from backend.detectors import run_detectors, signal_score
 from backend.knowledge import archetype, reporting_channels
 from backend.llm import LLMError, get_llm
 from backend.prompts import (
-    action_system, action_user, classify_system, classify_user,
-    context_system, context_user, verdict_system, verdict_user,
-    vision_system, vision_user,
+    action_system,
+    action_user,
+    classify_system,
+    classify_user,
+    context_system,
+    context_user,
+    verdict_system,
+    verdict_user,
+    vision_system,
+    vision_user,
 )
 from backend.schemas import (
-    ActionDraft, ActionPlan, AnalysisResult, ArchetypeMatch, Entities,
-    EvidenceAudit, MessageContext, RejectedClaim, ReportingChannel, RiskLevel,
-    Signal, Source, StepEvent, Tell, Transcription, Verdict,
+    ActionDraft,
+    ActionPlan,
+    AnalysisResult,
+    ArchetypeMatch,
+    Entities,
+    EvidenceAudit,
+    MessageContext,
+    RejectedClaim,
+    ReportingChannel,
+    RiskLevel,
+    Signal,
+    StepEvent,
+    Tell,
+    Transcription,
+    Verdict,
 )
 from backend.tavily import gather_evidence
 from backend.verify import reconcile_verdict, verify_archetype, verify_tells
 
+
 DISCLAIMER = (
     "Telltale gives you evidence and a considered opinion — not a guarantee. "
-    "Scammers adapt, and legitimate messages can look odd. When money or personal "
-    "data is at stake, verify through an official channel you find yourself."
+    "Scammers adapt, and legitimate messages can look odd. When money or "
+    "personal data is at stake, verify through an official channel you find yourself."
 )
 
 
-def _event(step: str, status: str, message: str, **data) -> StepEvent:
-    return StepEvent(step=step, status=status, message=message, data=data or None)
+def _event(
+    step: str,
+    status: str,
+    message: str,
+    **data,
+) -> StepEvent:
+    return StepEvent(
+        step=step,
+        status=status,
+        message=message,
+        data=data or None,
+    )
 
 
-def _infer_region(entities: Entities, text: str, hint: str | None) -> str | None:
+def _infer_region(
+    entities: Entities,
+    text: str,
+    hint: str | None,
+) -> str | None:
     if hint:
         return hint.upper()
-    if entities.upi_ids or re.search(r"₹|\b(?:rs\.?|inr)\b|\blakh|\bcrore", text, re.I):
+
+    if entities.upi_ids or re.search(
+        r"₹|\b(?:rs\.?|inr)\b|\blakh|\bcrore",
+        text,
+        re.I,
+    ):
         return "IN"
+
     return None
 
 
-# --------------------------------------------------------------------------- #
-#  Deterministic fallbacks (used when the model/network is unavailable)
-# --------------------------------------------------------------------------- #
-def _heuristic_context(text: str, entities: Entities) -> MessageContext:
+def _heuristic_context(
+    text: str,
+    entities: Entities,
+) -> MessageContext:
     lower = text.lower()
     channel = "unknown"
+
     if entities.emails or "subject:" in lower:
         channel = "email"
     elif "whatsapp" in lower:
         channel = "whatsapp"
     elif entities.urls:
         channel = "sms"
-    sender = entities.brands_mentioned[0] if entities.brands_mentioned else "unknown"
+
+    sender = (
+        entities.brands_mentioned[0]
+        if entities.brands_mentioned
+        else "unknown"
+    )
+
     return MessageContext(
-        language="unknown", channel=channel, claimed_sender=sender,
-        summary=text.strip()[:160], asked_to=[],
+        language="unknown",
+        channel=channel,
+        claimed_sender=sender,
+        summary=text.strip()[:160],
+        asked_to=[],
     )
 
 
-def _heuristic_archetype(text: str, signals: list[Signal]) -> ArchetypeMatch:
+def _heuristic_archetype(
+    text: str,
+    signals: list[Signal],
+) -> ArchetypeMatch:
     from backend.knowledge import archetypes
+
     lower = text.lower()
-    best_id, best_score = "none", 0
-    for a in archetypes().values():
-        score = sum(1 for kw in a.aliases if kw in lower)
-        if any(s.id == "payment.upi_collect" for s in signals) and a.id in ("marketplace", "otp_upi"):
+    best_id = "none"
+    best_score = 0
+
+    for candidate in archetypes().values():
+        score = sum(
+            1
+            for keyword in candidate.aliases
+            if keyword in lower
+        )
+
+        if (
+            any(signal.id == "payment.upi_collect" for signal in signals)
+            and candidate.id in ("marketplace", "otp_upi")
+        ):
             score += 1
+
         if score > best_score:
-            best_id, best_score = a.id, score
-    a = archetype(best_id) if best_id != "none" else None
+            best_id = candidate.id
+            best_score = score
+
+    matched = archetype(best_id) if best_id != "none" else None
+
     return ArchetypeMatch(
         archetype_id=best_id,
-        name=a.name if a else "Unclassified",
-        confidence=min(0.4 + 0.15 * best_score, 0.9) if a else 0.0,
+        name=matched.name if matched else "Unclassified",
+        confidence=(
+            min(0.4 + 0.15 * best_score, 0.9)
+            if matched
+            else 0.0
+        ),
         rationale="Matched by keyword overlap (model unavailable).",
         matched_tells=[],
     )
 
 
-def _heuristic_verdict(signals: list[Signal], floor: int) -> tuple[Verdict, list[Tell]]:
+def _heuristic_verdict(
+    signals: list[Signal],
+    floor: int,
+) -> tuple[Verdict, list[Tell]]:
     tells = [
-        Tell(title=s.label, explanation=s.detail, evidence_type="signal",
-             evidence_ref=s.id, quote="")
-        for s in sorted(signals, key=lambda x: -x.severity)[:6]
+        Tell(
+            title=signal.label,
+            explanation=signal.detail,
+            evidence_type="signal",
+            evidence_ref=signal.id,
+            quote="",
+        )
+        for signal in sorted(
+            signals,
+            key=lambda signal: -signal.severity,
+        )[:6]
     ]
-    v = Verdict(risk_level=RiskLevel.info, score=floor,
-                headline="Assessed from automated signals only (model unavailable).",
-                tells=tells, reasoning="The reasoning model was unavailable, so this "
-                "verdict reflects the deterministic detectors alone.")
-    return reconcile_verdict(v, tells, floor), tells
+
+    verdict = Verdict(
+        risk_level=RiskLevel.info,
+        score=floor,
+        headline=(
+            "Assessed from automated signals only "
+            "(model unavailable)."
+        ),
+        tells=tells,
+        reasoning=(
+            "The reasoning model was unavailable, so this verdict "
+            "reflects the deterministic detectors alone."
+        ),
+    )
+
+    return reconcile_verdict(verdict, tells, floor), tells
 
 
-def _not_proven(entities: Entities, context: MessageContext) -> list[str]:
-    """The honest counterweight to the tells: things a message analysis, on its
-    own, genuinely can't establish. Surfaced so the verdict never overclaims
-    certainty, and so the user knows exactly what an independent check would settle.
-    """
-    items = ["Whether this was really sent by the party it claims to be from."]
+def _not_proven(
+    entities: Entities,
+    context: MessageContext,
+) -> list[str]:
+    """Return claims that cannot be established from the available evidence."""
+
+    items = [
+        "Whether this was really sent by the party it claims to be from."
+    ]
+
     if entities.domains or entities.urls:
-        items.append("Who actually owns the linked domain, or whether it's the official site.")
+        items.append(
+            "Who actually owns the linked domain, or whether it's the official site."
+        )
+
     if entities.phones:
-        items.append("Whether the phone number truly belongs to the claimed sender.")
+        items.append(
+            "Whether the phone number truly belongs to the claimed sender."
+        )
+
     if entities.upi_ids or entities.crypto_addresses:
-        items.append("Who really controls the account the money would end up in.")
+        items.append(
+            "Who really controls the account the money would end up in."
+        )
+
     return items[:4]
 
 
 def _heuristic_action(a_name: str) -> ActionDraft:
     return ActionDraft(
         do_now=[],
-        do_not=["Don't click links, share codes, or pay anyone until you've verified independently."],
-        how_to_verify=["Contact the organisation through its official app or website — never a "
-                       "number or link from the message itself."],
+        do_not=[
+            "Don't click links, share codes, or pay anyone until "
+            "you've verified independently."
+        ],
+        how_to_verify=[
+            "Contact the organisation through its official app or website "
+            "— never a number or link from the message itself."
+        ],
         safe_reply="",
     )
 
 
-# --------------------------------------------------------------------------- #
-#  Main pipeline
-# --------------------------------------------------------------------------- #
 async def analyze(
-    *, text: str | None = None, url: str | None = None,
-    images: list[str] | None = None, region_hint: str | None = None,
+    *,
+    text: str | None = None,
+    url: str | None = None,
+    images: list[str] | None = None,
+    region_hint: str | None = None,
     input_kind: str = "text",
 ) -> AsyncIterator[StepEvent | AnalysisResult]:
     settings = get_settings()
     llm = get_llm()
     coverage: list[str] = []
 
-    # --- 1. Ingest ---------------------------------------------------------
-    yield _event("ingest", "started", "Reading what you gave me…")
+    # Ingest
+    yield _event(
+        "ingest",
+        "started",
+        "Reading what you gave me…",
+    )
+
     if images:
         if settings.has_llm:
             try:
-                tr = await llm.structured(Transcription, vision_system(), vision_user(),
-                                          model=settings.vision_model, images=images)
-                text = (tr.text or "").strip()
-                yield _event("ingest", "done", "Read the text out of your screenshot.")
-            except LLMError as e:
-                coverage.append(f"Couldn't read the image with the vision model ({e}).")
+                transcription = await llm.structured(
+                    Transcription,
+                    vision_system(),
+                    vision_user(),
+                    model=settings.vision_model,
+                    images=images,
+                )
+
+                text = (transcription.text or "").strip()
+
+                yield _event(
+                    "ingest",
+                    "done",
+                    "Read the text out of your screenshot.",
+                )
+
+            except LLMError as exc:
+                coverage.append(
+                    f"Couldn't read the image with the vision model ({exc})."
+                )
                 text = text or ""
-                yield _event("ingest", "error", "Couldn't read the screenshot; continuing with any text you added.")
+
+                yield _event(
+                    "ingest",
+                    "error",
+                    "Couldn't read the screenshot; continuing "
+                    "with any text you added.",
+                )
         else:
-            coverage.append("Screenshot reading needs a model key; none configured.")
+            coverage.append(
+                "Screenshot reading needs a model key; none configured."
+            )
             text = text or ""
-            yield _event("ingest", "skipped", "No model key — can't read the screenshot.")
+
+            yield _event(
+                "ingest",
+                "skipped",
+                "No model key — can't read the screenshot.",
+            )
+
     elif url:
-        # We analyse the link itself and research its reputation; we don't fetch
-        # the page (never render a suspect site to the user).
+        # Do not fetch or render the submitted URL.
         text = url.strip()
-        yield _event("ingest", "done", "Analysing the link (not opening it).")
+
+        yield _event(
+            "ingest",
+            "done",
+            "Analysing the link (not opening it).",
+        )
+
     else:
         text = (text or "").strip()
-        yield _event("ingest", "done", "Got it.")
+
+        yield _event(
+            "ingest",
+            "done",
+            "Got it.",
+        )
 
     if not text:
-        yield _event("ingest", "error", "There was nothing to analyse.")
+        yield _event(
+            "ingest",
+            "error",
+            "There was nothing to analyse.",
+        )
         return
 
-    # --- 2. Deterministic detectors ---------------------------------------
-    yield _event("detect", "started", "Scanning for red flags…")
+    # Deterministic detectors
+    yield _event(
+        "detect",
+        "started",
+        "Scanning for red flags…",
+    )
+
     entities, signals = run_detectors(text)
     floor = signal_score(signals)
     region = _infer_region(entities, text, region_hint)
-    yield _event("detect", "done",
-                 f"Found {len(signals)} concrete signal(s).",
-                 signals=len(signals), entities=entities.model_dump())
 
-    # --- 3. Context --------------------------------------------------------
-    yield _event("context", "started", "Working out what it claims to be…")
+    yield _event(
+        "detect",
+        "done",
+        f"Found {len(signals)} concrete signal(s).",
+        signals=len(signals),
+        entities=entities.model_dump(),
+    )
+
+    # Context
+    yield _event(
+        "context",
+        "started",
+        "Working out what it claims to be…",
+    )
+
     if settings.has_llm:
         try:
-            # Lightweight extraction runs on the fast/cheap Nano model; the
-            # reasoning-heavy steps below stay on Super.
-            context = await llm.structured(MessageContext, context_system(), context_user(text),
-                                           model=settings.fast_model)
-            yield _event("context", "done", f"Looks like a {context.channel} from {context.claimed_sender}.",
-                         context=context.model_dump())
-        except LLMError as e:
+            context = await llm.structured(
+                MessageContext,
+                context_system(),
+                context_user(text),
+                model=settings.fast_model,
+            )
+
+            yield _event(
+                "context",
+                "done",
+                f"Looks like a {context.channel} from "
+                f"{context.claimed_sender}.",
+                context=context.model_dump(),
+            )
+
+        except LLMError as exc:
             context = _heuristic_context(text, entities)
-            coverage.append(f"Context read heuristically (model error: {e}).")
-            yield _event("context", "error", "Model unavailable; read context heuristically.")
+
+            coverage.append(
+                f"Context read heuristically (model error: {exc})."
+            )
+
+            yield _event(
+                "context",
+                "error",
+                "Model unavailable; read context heuristically.",
+            )
     else:
         context = _heuristic_context(text, entities)
-        coverage.append("Running without a model key — deterministic mode only.")
-        yield _event("context", "skipped", "No model key; using heuristics.")
 
-    # --- 4. Archetype ------------------------------------------------------
-    yield _event("classify", "started", "Matching it to known scam patterns…")
+        coverage.append(
+            "Running without a model key — deterministic mode only."
+        )
+
+        yield _event(
+            "context",
+            "skipped",
+            "No model key; using heuristics.",
+        )
+
+    # Archetype
+    yield _event(
+        "classify",
+        "started",
+        "Matching it to known scam patterns…",
+    )
+
     if settings.has_llm:
         try:
             match = verify_archetype(
-                await llm.structured(ArchetypeMatch, classify_system(), classify_user(text, context))
+                await llm.structured(
+                    ArchetypeMatch,
+                    classify_system(),
+                    classify_user(text, context),
+                )
             )
-        except LLMError as e:
+        except LLMError as exc:
             match = _heuristic_archetype(text, signals)
-            coverage.append(f"Archetype matched heuristically (model error: {e}).")
+
+            coverage.append(
+                f"Archetype matched heuristically (model error: {exc})."
+            )
     else:
         match = _heuristic_archetype(text, signals)
+
     arch = archetype(match.archetype_id)
-    yield _event("classify", "done",
-                 f"Closest pattern: {match.name}." if match.archetype_id != "none"
-                 else "No single known pattern dominates.",
-                 archetype=match.model_dump())
 
-    # --- 5. Live research (Tavily) ----------------------------------------
-    yield _event("research", "started", "Checking links and numbers against live reports…")
-    sources, research_notes, queries = await gather_evidence(entities, context.claimed_sender, region)
+    yield _event(
+        "classify",
+        "done",
+        (
+            f"Closest pattern: {match.name}."
+            if match.archetype_id != "none"
+            else "No single known pattern dominates."
+        ),
+        archetype=match.model_dump(),
+    )
+
+    # Live research
+    yield _event(
+        "research",
+        "started",
+        "Checking links and numbers against live reports…",
+    )
+
+    sources, research_notes, queries = await gather_evidence(
+        entities,
+        context.claimed_sender,
+        region,
+    )
+
     coverage.extend(research_notes)
-    yield _event("research", "done",
-                 f"{len(sources)} live source(s) found." if sources else "No live reports found.",
-                 sources=[s.model_dump() for s in sources], queries=queries)
 
-    # --- 6. Verdict --------------------------------------------------------
-    # This is where the model proposes and the verifier disposes. Every tell the
-    # model returns is checked against real evidence; the ones that don't hold up
-    # are recorded (not just discarded) so the UI can show its working.
-    yield _event("verdict", "started", "Weighing the evidence…")
+    yield _event(
+        "research",
+        "done",
+        (
+            f"{len(sources)} live source(s) found."
+            if sources
+            else "No live reports found."
+        ),
+        sources=[source.model_dump() for source in sources],
+        queries=queries,
+    )
+
+    # Verdict
+    yield _event(
+        "verdict",
+        "started",
+        "Weighing the evidence…",
+    )
+
     rejected_claims: list[RejectedClaim] = []
+
     if settings.has_llm:
         try:
             raw_verdict = await llm.structured(
-                Verdict, verdict_system(),
-                verdict_user(text, context, entities, signals, sources,
-                             match.name, arch.how_it_works if arch else "Unknown pattern.", floor),
+                Verdict,
+                verdict_system(),
+                verdict_user(
+                    text,
+                    context,
+                    entities,
+                    signals,
+                    sources,
+                    match.name,
+                    (
+                        arch.how_it_works
+                        if arch
+                        else "Unknown pattern."
+                    ),
+                    floor,
+                ),
             )
-            kept, rejected_claims = verify_tells(raw_verdict.tells, signals, sources, text)
+
+            kept, rejected_claims = verify_tells(
+                raw_verdict.tells,
+                signals,
+                sources,
+                text,
+            )
+
             if rejected_claims:
                 coverage.append(
-                    f"Verifier rejected {len(rejected_claims)} model claim(s) the evidence "
-                    "couldn't support."
+                    f"Verifier rejected {len(rejected_claims)} model "
+                    "claim(s) the evidence couldn't support."
                 )
-            verdict = reconcile_verdict(raw_verdict, kept, floor)
+
+            verdict = reconcile_verdict(
+                raw_verdict,
+                kept,
+                floor,
+            )
+
             evidence_audit = EvidenceAudit(
-                proposed=len(raw_verdict.tells), kept=len(kept),
+                proposed=len(raw_verdict.tells),
+                kept=len(kept),
                 rejected=len(rejected_claims),
             )
-        except LLMError as e:
-            verdict, kept = _heuristic_verdict(signals, floor)
-            evidence_audit = EvidenceAudit(proposed=len(kept), kept=len(kept), rejected=0)
-            coverage.append(f"Verdict from signals only (model error: {e}).")
-    else:
-        verdict, kept = _heuristic_verdict(signals, floor)
-        evidence_audit = EvidenceAudit(proposed=len(kept), kept=len(kept), rejected=0)
-    yield _event("verdict", "done", verdict.headline,
-                 verdict=verdict.model_dump(),
-                 evidence_audit=evidence_audit.model_dump(),
-                 rejected_claims=[rc.model_dump() for rc in rejected_claims])
 
-    # --- 7. Action plan ----------------------------------------------------
-    yield _event("action", "started", "Writing your next steps…")
+        except LLMError as exc:
+            verdict, kept = _heuristic_verdict(
+                signals,
+                floor,
+            )
+
+            evidence_audit = EvidenceAudit(
+                proposed=len(kept),
+                kept=len(kept),
+                rejected=0,
+            )
+
+            coverage.append(
+                f"Verdict from signals only (model error: {exc})."
+            )
+
+    else:
+        verdict, kept = _heuristic_verdict(
+            signals,
+            floor,
+        )
+
+        evidence_audit = EvidenceAudit(
+            proposed=len(kept),
+            kept=len(kept),
+            rejected=0,
+        )
+
+    yield _event(
+        "verdict",
+        "done",
+        verdict.headline,
+        verdict=verdict.model_dump(),
+        evidence_audit=evidence_audit.model_dump(),
+        rejected_claims=[
+            claim.model_dump()
+            for claim in rejected_claims
+        ],
+    )
+
+    # Action plan
+    yield _event(
+        "action",
+        "started",
+        "Writing your next steps…",
+    )
+
     if settings.has_llm:
         try:
             draft = await llm.structured(
-                ActionDraft, action_system(),
-                action_user(text, context, verdict.risk_level.value, match.name),
+                ActionDraft,
+                action_system(),
+                action_user(
+                    text,
+                    context,
+                    verdict.risk_level.value,
+                    match.name,
+                ),
             )
-        except LLMError as e:
+        except LLMError as exc:
             draft = _heuristic_action(match.name)
-            coverage.append(f"Action steps are generic (model error: {e}).")
+            coverage.append(
+                f"Action steps are generic (model error: {exc})."
+            )
     else:
         draft = _heuristic_action(match.name)
 
-    report_to = [ReportingChannel(**c) for c in reporting_channels(region)]
+    report_to = [
+        ReportingChannel(**channel)
+        for channel in reporting_channels(region)
+    ]
+
     action_plan = ActionPlan(
-        do_now=draft.do_now, do_not=draft.do_not,
-        how_to_verify=draft.how_to_verify, report_to=report_to,
+        do_now=draft.do_now,
+        do_not=draft.do_not,
+        how_to_verify=draft.how_to_verify,
+        report_to=report_to,
         safe_reply=draft.safe_reply,
     )
-    yield _event("action", "done", "Done.")
 
-    # --- 8. Assemble -------------------------------------------------------
+    yield _event(
+        "action",
+        "done",
+        "Done.",
+    )
+
+    # Assemble
     result = AnalysisResult(
-        input_kind=input_kind, extracted_text=text, context=context,
-        entities=entities, signals=signals, sources=sources, archetype=match,
+        input_kind=input_kind,
+        extracted_text=text,
+        context=context,
+        entities=entities,
+        signals=signals,
+        sources=sources,
+        archetype=match,
         archetype_how=arch.how_it_works if arch else "",
         archetype_refs=arch.refs if arch else [],
         verdict=verdict,
@@ -289,6 +611,99 @@ async def analyze(
         rejected_claims=rejected_claims,
         not_proven=_not_proven(entities, context),
         action_plan=action_plan,
-        coverage_notes=coverage, disclaimer=DISCLAIMER,
+        coverage_notes=coverage,
+        disclaimer=DISCLAIMER,
     )
+
     yield result
+
+
+# Completed text/URL analyses are cached for repeat requests.
+_RESULT_CACHE: OrderedDict[
+    str,
+    list[StepEvent | AnalysisResult],
+] = OrderedDict()
+
+_CACHE_MAX = 256
+
+
+def _cache_key(
+    text: str | None,
+    url: str | None,
+    region_hint: str | None,
+    input_kind: str,
+) -> str:
+    value = "\x1f".join(
+        (
+            input_kind,
+            region_hint or "",
+            url or "",
+            (text or "").strip(),
+        )
+    )
+
+    return hashlib.sha256(
+        value.encode("utf-8")
+    ).hexdigest()
+
+
+async def analyze_cached(
+    *,
+    text: str | None = None,
+    url: str | None = None,
+    images: list[str] | None = None,
+    region_hint: str | None = None,
+    input_kind: str = "text",
+) -> AsyncIterator[StepEvent | AnalysisResult]:
+    """Run analysis with an in-memory cache for text and URL inputs."""
+
+    # Uploaded images are not cached because each request carries its own
+    # image data.
+    if images:
+        async for item in analyze(
+            text=text,
+            url=url,
+            images=images,
+            region_hint=region_hint,
+            input_kind=input_kind,
+        ):
+            yield item
+
+        return
+
+    key = _cache_key(
+        text=text,
+        url=url,
+        region_hint=region_hint,
+        input_kind=input_kind,
+    )
+
+    cached = _RESULT_CACHE.get(key)
+
+    if cached is not None:
+        _RESULT_CACHE.move_to_end(key)
+
+        for item in cached:
+            yield item
+
+        return
+
+    items: list[StepEvent | AnalysisResult] = []
+
+    async for item in analyze(
+        text=text,
+        url=url,
+        images=None,
+        region_hint=region_hint,
+        input_kind=input_kind,
+    ):
+        items.append(item)
+        yield item
+
+    # Do not cache incomplete runs.
+    if items and isinstance(items[-1], AnalysisResult):
+        _RESULT_CACHE[key] = items
+        _RESULT_CACHE.move_to_end(key)
+
+        while len(_RESULT_CACHE) > _CACHE_MAX:
+            _RESULT_CACHE.popitem(last=False)
