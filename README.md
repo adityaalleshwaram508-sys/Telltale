@@ -11,7 +11,7 @@ push the risk below what the hard evidence already justifies.
 
 Reasoning: **NVIDIA Nemotron** on **Nebius Token Factory** · Live verification: **Tavily**
 
-**Live demo:** https://telltale-jawt.onrender.com &nbsp;·&nbsp; **Demo video:** _add your YouTube link_ &nbsp;·&nbsp; **Architecture:** [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md)
+**Live demo:** https://telltale-jawt.onrender.com &nbsp;·&nbsp; **Demo video:** _ YouTube link_ &nbsp;·&nbsp; **Architecture:** [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md)
 
 *Built for the 2026 Nebius × NVIDIA Global AI Hackathon.*
 
@@ -78,6 +78,8 @@ python eval/grounding.py     # Evidence Integrity Benchmark (no API key needed)
 
 ## What it looks like
 
+_These screenshots are one example run. Telltale calls Nemotron and Tavily live, so the exact score and the number of tells shift a little between runs. What never changes is that it flags this as a high-risk scam, never returns safe, and shows every finding backed by evidence._
+
 **1. Input** — paste a suspicious message, link, or screenshot, or try a built-in example (including the adversarial "Challenge Telltale" set).
 
 ![Input](docs/shot-1-input.png)
@@ -86,7 +88,7 @@ python eval/grounding.py     # Evidence Integrity Benchmark (no API key needed)
 
 ![Evidence](docs/shot-2-evidence.png)
 
-**3. Verification** — the Evidence check on every result: how many findings the model proposed, how many the evidence backed, and any it couldn't (rejected, with the reason). Here all five were backed; the verifier's rejection behaviour is measured reproducibly in the [Evidence Integrity Benchmark](docs/EVALUATION.md).
+**3. Verification** — the Evidence check on every result: how many findings the model proposed, how many the evidence backed, and any it couldn't (rejected, with the reason). In this example every finding was backed, and the exact count varies between runs because the analysis is live; the verifier's rejection behaviour is measured reproducibly in the [Evidence Integrity Benchmark](docs/EVALUATION.md).
 
 ![Verification](docs/shot-3-verification.png)
 
@@ -142,7 +144,7 @@ Pipeline:
 4. **Nemotron Super** synthesises a verdict; **`verify.py`** drops any tell it
    can't ground and clamps the score to the floor.
 
-Result: `HIGH · 78/100`, every tell bound to a signal, a source, or a quote, and
+Result: flagged as a high-risk scam in the `HIGH` to `CRITICAL` band, every tell bound to a signal, a source, or a quote, and
 an Evidence check panel showing what the model proposed versus what survived.
 
 ## Architecture
