@@ -3,16 +3,18 @@
 Order doesn't matter to correctness, but we extract entities first because the
 URL / payment / contact detectors all reason about them.
 """
+
 from __future__ import annotations
 
+from backend.knowledge import lexicons
 from backend.schemas import Entities, Signal
 
 from .contacts import analyze_contacts
 from .entities import extract_entities
 from .injection import analyze_injection
 from .language import analyze_language
-from .payments import analyze_payments
-from .urls import analyze_urls
+from .payments import PAYMENT_SIGNAL_IDS, analyze_payments
+from .urls import URL_SIGNAL_IDS, analyze_urls
 
 
 def run_detectors(text: str) -> tuple[Entities, list[Signal]]:
@@ -29,10 +31,10 @@ def run_detectors(text: str) -> tuple[Entities, list[Signal]]:
 def signal_score(signals: list[Signal]) -> int:
     """A transparent 0-100 floor from the deterministic signals alone.
 
-    This is NOT the final verdict — the model can raise the risk after reasoning
-    and live research — but it stops a message stuffed with red flags from ever
-    being scored as safe just because the model got talked around. Severity 3
-    signals dominate; a couple of them alone should read as high risk.
+    Not the verdict: the model can raise the risk after reasoning and research, but it
+    can't go below this. The weights (6, 16, 30 for severity 1-3) are hand-set so that one
+    severe signal plus one moderate one reaches the medium band; they are not fitted to
+    data. The hard negatives and eval/external.py are how changes to them get checked.
     """
     if not signals:
         return 0
@@ -45,3 +47,11 @@ def signal_score(signals: list[Signal]) -> int:
         seen_ids.add(s.id)
         total += weight.get(s.severity, 0)
     return min(total, 100)
+
+
+def signal_vocabulary() -> list[str]:
+    """Every signal id a detector can emit. The evidence benchmark draws plausible
+    fabricated citations from it; a test keeps it complete."""
+    ids = set(URL_SIGNAL_IDS) | set(PAYMENT_SIGNAL_IDS) | {lex.id for lex in lexicons()}
+    ids |= {"contact.freemail_impersonation", "language.prompt_injection"}
+    return sorted(ids)

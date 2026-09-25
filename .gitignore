@@ -9,3 +9,6 @@ venv/
 .coverage
 htmlcov/
 node_modules/
+
+# External datasets are downloaded, not committed
+eval/data/

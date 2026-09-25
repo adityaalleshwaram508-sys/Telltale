@@ -1,14 +1,22 @@
-# Language-signal lexicons.
+# Language-signal lexicons for detectors/language.py.
 #
-# These feed a simple, transparent phrase matcher (detectors/language.py). It is
-# deliberately NOT a model — a match is a fact ("this phrase appears here") that
-# we can point at, which is exactly what keeps the verdict honest. The model gets
-# to interpret; the matcher only reports what's literally present.
+# A plain phrase matcher, not a model: a hit is a fact ("this phrase appears here") the
+# verdict can point at.
 #
-# Phrases are matched case-insensitively as substrings. A few Hindi/Hinglish
-# terms are included because a lot of scams targeting India arrive that way.
+#   terms     whole words or phrases, case-insensitive. Common inflections count (arrest
+#             matches arrested) and a space also matches a hyphen (part time, part-time).
+#   patterns  optional regular expressions for what a fixed phrase can't express.
+#   advisory_sensitive
+#             skip sentences that warn about the thing instead of asking for it, e.g. "HDFC
+#             Bank will never ask for your UPI PIN". Banks send those warnings constantly.
+#   severity  0-3, how strongly the category nudges the risk floor.
 #
-# severity: 0-3, how strongly the category nudges the risk score.
+# Terms that fired on ordinary messages in tests/test_hard_negatives.py were removed or
+# narrowed: fine, court, between us, beneficiary, deposit of, convenience fee, hiring team,
+# recruitment team, a bare "guaranteed", and noun-only credential words such as "card
+# number" or "verification code" that every genuine OTP and card alert contains.
+#
+# A few Hindi/Hinglish terms are included because many scams aimed at India arrive that way.
 
 lexicons:
   - id: language.urgency
@@ -22,6 +30,7 @@ lexicons:
       - last chance
       - expires today
       - urgent
+      - urgently
       - hurry
       - right now
       - before it's too late
@@ -41,12 +50,16 @@ lexicons:
       - lawsuit
       - police
       - fir will be filed
-      - court
+      - court case
+      - court order
+      - court summons
+      - court notice
       - deportation
       - your account has been frozen
       - blocked permanently
       - penalty
-      - fine
+      - fined
+      - pay a fine
       - jail
       - non-bailable
       - money laundering
@@ -67,7 +80,8 @@ lexicons:
       - stay on the call
       - do not hang up
       - don't inform your bank
-      - between us
+      - just between us
+      - keep this between us
       - confidential matter
 
   - id: language.too_good
@@ -76,7 +90,6 @@ lexicons:
     terms:
       - guaranteed returns
       - guaranteed profit
-      - guaranteed
       - risk free
       - double your money
       - you have won
@@ -90,17 +103,18 @@ lexicons:
       - no risk
       - earn from home
       - work from home earn
+    patterns:
+      # "guaranteed" next to a percentage return, in either order
+      - '\d+\s*%[^.!?\n]{0,30}\bguaranteed\b'
+      - '\bguaranteed\b[^.!?\n]{0,30}\d+\s*%'
 
   - id: language.recruitment_bait
     label: Unsolicited "easy money" job bait
     severity: 2
     terms:
       - part time job
-      - part-time job
       - part time online job
       - work from home
-      - recruitment team
-      - hiring team
       - per task
       - daily income
       - high commission
@@ -111,32 +125,42 @@ lexicons:
   - id: language.credentials
     label: Asks for a secret code or credential
     severity: 3
+    advisory_sensitive: true
     terms:
       - share otp
+      - share the otp
+      - share your otp
       - send otp
+      - send the otp
+      - send your otp
+      - send me the otp
       - tell me the otp
+      - tell me your otp
       - enter your otp
-      - upi pin
+      - share the code
+      - share the verification code
+      - send the verification code
       - enter upi pin
+      - enter your upi pin
+      - share your upi pin
+      - share your pin
+      - share your mpin
       - cvv
-      - card number
-      - expiry date
+      - share your card number
+      - send your card number
       - net banking password
-      - login password
-      - mpin
-      - verification code
+      - share your password
 
   - id: language.remote_access
     label: Wants remote access to your device
     severity: 3
+    advisory_sensitive: true
     terms:
       - anydesk
       - teamviewer
       - ultraviewer
       - quicksupport
       - install this app
-      - screen share
-      - screen sharing
       - remote access
       - download the app to fix
 
@@ -170,12 +194,10 @@ lexicons:
       - recharge to withdraw
       - registration fee
       - gst charge
-      - convenience fee
       - pay a small amount
       - tax fee
       - withdrawal fee
       - small fee
-      - deposit of
       - return the extra
       - overpaid
       - sent too much
@@ -207,9 +229,12 @@ lexicons:
     label: Advance-fee / beneficiary hook
     severity: 2
     terms:
-      - beneficiary
+      - as the beneficiary
+      - bequest
+      - the beneficiary of
       - next of kin
       - inheritance
       - unclaimed funds
+      - unclaimed inheritance
       - selected as the winner
       - you have been chosen

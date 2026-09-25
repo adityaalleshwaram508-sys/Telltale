@@ -1,9 +1,10 @@
 """Loads the curated knowledge base and exposes it as typed, cached lookups.
 
 The YAML under data/ is the source of truth. Everything here is read once at
-import time — it's small, static, and reviewed by hand, so there's no reason to
+import time. It's small, static and reviewed by hand, so there's no reason to
 reload it per request.
 """
+
 from __future__ import annotations
 
 import functools
@@ -32,7 +33,7 @@ class Archetype:
     signature_tells: list[str]
     channels: list[str]
     payment_rails: list[str]
-    regions: object            # "global" or a list of ISO-2 codes
+    regions: object  # "global" or a list of ISO-2 codes
     refs: list[dict] = field(default_factory=list)
 
 
@@ -68,7 +69,7 @@ def archetype_menu() -> str:
     lines = []
     for a in archetypes().values():
         alias = f" (aka {', '.join(a.aliases[:3])})" if a.aliases else ""
-        lines.append(f"- {a.id}: {a.name}{alias} — {a.how_it_works}")
+        lines.append(f"- {a.id}: {a.name}{alias}. {a.how_it_works}")
     return "\n".join(lines)
 
 
@@ -108,15 +109,25 @@ class Brand:
     name: str
     domains: list[str]
     keywords: list[str]
+    indian_bank: bool = False  # any *.bank.in link counts as the brand's own
 
 
 @functools.lru_cache
 def brands() -> list[Brand]:
     raw = _load_yaml("brands.yaml")
     return [
-        Brand(name=b["name"], domains=b.get("domains", []), keywords=b.get("keywords", []))
+        Brand(
+            name=b["name"],
+            domains=[d.lower() for d in b.get("domains", [])],
+            keywords=[k.lower() for k in b.get("keywords", [])],
+            indian_bank=bool(b.get("indian_bank", False)),
+        )
         for b in raw["brands"]
     ]
+
+
+def brand_by_name(name: str) -> Brand | None:
+    return next((b for b in brands() if b.name == name), None)
 
 
 @functools.lru_cache
@@ -146,12 +157,21 @@ class Lexicon:
     label: str
     severity: int
     terms: list[str]
+    patterns: list[str] = field(default_factory=list)
+    advisory_sensitive: bool = False
 
 
 @functools.lru_cache
 def lexicons() -> list[Lexicon]:
     raw = _load_yaml("lexicons.yaml")["lexicons"]
     return [
-        Lexicon(id=l["id"], label=l["label"], severity=int(l["severity"]), terms=l["terms"])
-        for l in raw
+        Lexicon(
+            id=lex["id"],
+            label=lex["label"],
+            severity=int(lex["severity"]),
+            terms=[str(x) for x in lex.get("terms", [])],
+            patterns=[str(x) for x in lex.get("patterns", [])],
+            advisory_sensitive=bool(lex.get("advisory_sensitive", False)),
+        )
+        for lex in raw
     ]

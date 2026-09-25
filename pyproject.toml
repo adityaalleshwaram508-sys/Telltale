@@ -1,0 +1,34 @@
+[project]
+name = "telltale"
+version = "0.2.0"
+description = "Evidence-bound scam analysis with NVIDIA Nemotron on Nebius Token Factory"
+requires-python = ">=3.11"
+license = { text = "MIT" }
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+extend-exclude = ["frontend"]
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "B", "UP"]
+ignore = ["E501"]  # the formatter owns line length; long literal strings are fine
+
+[tool.ruff.lint.flake8-bugbear]
+# FastAPI declares request parameters through default-argument calls.
+extend-immutable-calls = ["fastapi.File", "fastapi.Form", "fastapi.Depends", "fastapi.Query"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["backend"]
+split-on-trailing-comma = false
+
+[tool.pytest.ini_options]
+pythonpath = ["."]
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
+testpaths = ["tests"]
+
+[tool.ruff.format]
+# Collapse calls that fit on one line instead of keeping them exploded because
+# of a trailing comma. Keeps pipeline.py and app.py in the same style as the rest.
+skip-magic-trailing-comma = true

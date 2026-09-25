@@ -1,247 +1,464 @@
 #!/usr/bin/env python3
 """Evidence Integrity Benchmark.
 
-Telltale's central claim isn't an accuracy score — it's an *invariant*: a language
-model may propose a claim, but no claim reaches the user unless it's grounded in
-the observed input, a deterministic signal, or a retrieved source, and the model
-can never push the risk below what the hard evidence already justifies.
+Feeds findings a model might produce through the verifier the app uses (backend/verify.py)
+and counts how many it misjudges. No API key and no network, so every number is a property
+of the code and reproduces exactly.
 
-This benchmark tests that invariant adversarially. It constructs 100 adversarial
-claims across the five ways a model can fabricate or over-reach, mixes in a
-control set of genuinely-grounded claims, and runs every one through the *exact*
-verifier the app uses (backend/verify.py). The cases are built against a real
-message and its real detector output, so nothing here is mocked.
+Substrates are every labelled sample, adversarial sample and hard negative in
+backend/samples.py. For each message the benchmark computes the real detector signals and
+builds two research fixtures in the shape Tavily returns, one naming a link or number from
+the message and one that only discusses the scam pattern. The fixtures are synthetic: this
+measures how the verifier treats sources, not what live search returns.
 
-It's deterministic and needs no API key: every number below is a property of the
-verification code, reproducible by anyone who runs it.
+Case families
+  pointer   the cited evidence doesn't exist: a real signal id that didn't fire on this
+            message, a source id research didn't return, a near-miss quote with one word
+            changed, a sentence lifted from a different message
+  support   the pointer is valid but doesn't back the claim: a quote the message only uses
+            in the negative, a one-word quote, a source excerpt that isn't in the source,
+            a named link or number backed by a source that never mentions it, "has been
+            reported" backed only by a detector signal
+  taxonomy  an archetype id that sounds right but isn't in the catalogue
+  floor     a verdict scored below the detector floor
+  control   grounded findings that must survive: every real signal with its own wording,
+            real quotes, excerpts from the matching source
 
-    python eval/grounding.py
+Not covered: whether a tell's explanation paraphrases its evidence faithfully. That needs
+semantic entailment, which string checks can't provide.
 
-Adversarial cases (100)          Controls (grounded claims that must survive)
-    25  fabricated signals           real detected signals
-    25  fabricated quotes            real substrings of the message
-    20  fabricated citations         real returned source ids
-    15  out-of-taxonomy archetypes   valid archetypes
-    15  score-manipulation attempts
-
-Metrics
-    Claim rejection rate    fabricated signal/quote/citation claims rejected   want 100%
-    Quote fidelity          quote claims adjudicated correctly (both ways)     want 100%
-    Citation validity       citation claims adjudicated correctly              want 100%
-    Signal grounding        signal claims adjudicated correctly                want 100%
-    Archetype integrity     out-of-taxonomy archetypes forced to "none"        want 100%
-    Risk-floor violations   score-manipulations that beat the floor            want 0
-    False rejections        genuinely-grounded claims wrongly dropped          want 0
+    python eval/grounding.py [--json path]
 """
+
 from __future__ import annotations
 
+import argparse
+import json
+import random
+import re
 import sys
+from collections import Counter
+from dataclasses import dataclass, field
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from backend.detectors import run_detectors, signal_score          # noqa: E402
-from backend.knowledge import archetype_ids                        # noqa: E402
-from backend.samples import get_sample                             # noqa: E402
+from backend.detectors import run_detectors, signal_score, signal_vocabulary  # noqa: E402
+from backend.detectors.entities import entities_mentioned  # noqa: E402
+from backend.knowledge import archetype_ids  # noqa: E402
+from backend.samples import ADVERSARIAL, HARD_NEGATIVES, SAMPLES, Sample  # noqa: E402
 from backend.schemas import ArchetypeMatch, RiskLevel, Source, Tell, Verdict  # noqa: E402
-from backend.verify import (                                       # noqa: E402
-    _band, _norm, reconcile_verdict, verify_archetype, verify_tells,
+from backend.verify import (  # noqa: E402
+    BAND_ORDER,
+    normalize,
+    reconcile_verdict,
+    risk_band,
+    verify_archetype,
+    verify_tells,
 )
 
-# --------------------------------------------------------------------------- #
-#  Real substrate: a real message + its real detector output. The adversarial
-#  cases are constructed relative to THIS, so "fabricated" always means "not
-#  actually present", never merely "looks made up".
-# --------------------------------------------------------------------------- #
-MESSAGE = get_sample("delivery_sms").text
-_, SIGNALS = run_detectors(MESSAGE)
-REAL_SIGNAL_IDS = sorted({s.id for s in SIGNALS})
-FLOOR = signal_score(SIGNALS)
-MSG_NORM = _norm(MESSAGE)
-
-# A realistic "returned sources" set, as Tavily would hand back.
-SOURCES = [
-    Source(id=f"src{i}", title=f"Reported scam source {i}",
-           url=f"https://example.com/r{i}", snippet="community scam report")
-    for i in range(1, 4)                       # src1, src2, src3
+SEED = 20260925  # fixed, so the case set is identical on every run
+NEGATORS = {"not", "never", "no", "don't", "dont", "won't", "cannot", "can't", "if", "unless"}
+SWAPS = ["today", "account", "refund", "urgently", "bonus", "office", "parcel", "wallet"]
+BOGUS_ARCHETYPES = [
+    "courier_fraud",
+    "phishing",
+    "otp_scam",
+    "romance",
+    "digital_arrest_scam",
+    "kyc_update",
+    "lottery",
+    "investment_fraud",
+    "job_scam",
+    "tech_support_scam",
+    "upi_fraud",
+    "sextortion",
+    "loan_fraud",
+    "impersonation",
+    "crypto_scam",
 ]
-REAL_SOURCE_IDS = [s.id for s in SOURCES]
-VALID_ARCHETYPES = sorted(archetype_ids())
+OUTSIDE_CLAIMS = [
+    ("Reported by other victims", "Other victims have reported this message."),
+    ("Police have warned about this", "The police have warned about this exact message."),
+    ("Blacklisted sender", "This sender has been blacklisted by the telecom regulator."),
+    ("Known scam domain", "The link is a known scam domain."),
+    ("RBI has flagged this", "RBI has flagged this link as fraudulent."),
+]
 
 
-# --------------------------------------------------------------------------- #
-#  Case construction
-# --------------------------------------------------------------------------- #
-def _fabricated_quotes(n: int) -> list[str]:
-    """Scam-plausible phrases that are NOT in the message (verified)."""
-    pool = [
-        "wire me ten thousand dollars", "please share your OTP now",
-        "send a photo of your Aadhaar card", "your account has been hacked",
-        "click here to claim your cash prize", "install AnyDesk right now",
-        "buy Google Play gift cards", "you have won the lottery",
-        "transfer to this bitcoin wallet", "I am from the cyber crime branch",
-        "your electricity will be cut tonight", "reply with your CVV and PIN",
-        "scan this QR code to receive money", "a warrant has been issued",
-    ]
-    pool += [f"this fabricated clause number {i} never appears in the source text"
-             for i in range(1, n + 1)]
-    out = [q for q in pool if _norm(q) not in MSG_NORM]   # guarantee truly absent
-    return out[:n]
+@dataclass
+class Case:
+    family: str
+    kind: str
+    substrate: str
+    should_keep: bool
+    tell: Tell | None = None
 
 
-def _real_quotes(n: int) -> list[str]:
-    """Genuine substrings pulled straight from the message (guaranteed present)."""
-    words, out, i = MESSAGE.split(), [], 0
-    while len(out) < n and i < len(words):
-        window = " ".join(words[i:i + 4])
-        if _norm(window) and _norm(window) in MSG_NORM and window not in out:
-            out.append(window)
-        i += 2
-    return out
+@dataclass
+class Substrate:
+    sample: Sample
+    text: str
+    entities: object
+    signals: list
+    floor: int
+    sources: list[Source] = field(default_factory=list)
 
 
-def _tell(title: str, ev_type: str, ref: str = "", quote: str = "") -> Tell:
-    return Tell(title=title, explanation="(benchmark case)",
-                evidence_type=ev_type, evidence_ref=ref, quote=quote)
+def _words(text: str) -> list[str]:
+    return [w.strip(" .,;:!?\"'()[]") for w in text.split() if w.strip(" .,;:!?\"'()[]")]
 
 
-def build_tell_cases() -> list[tuple[str, Tell, bool]]:
-    """Return (category, tell, should_be_kept) for every signal/quote/citation case."""
-    cases: list[tuple[str, Tell, bool]] = []
-
-    # --- signals: 25 fabricated (reject) + the real ones (keep) --------------
-    for i in range(1, 26):
-        cases.append(("signal", _tell(f"fab-signal-{i}", "signal", f"signal.fabricated_{i:03d}"), False))
-    for sid in REAL_SIGNAL_IDS:
-        cases.append(("signal", _tell(f"real-signal-{sid}", "signal", sid), True))
-
-    # --- quotes: 25 fabricated (reject) + 10 real substrings (keep) ----------
-    for i, q in enumerate(_fabricated_quotes(25), 1):
-        cases.append(("quote", _tell(f"fab-quote-{i}", "quote", "quote", quote=q), False))
-    for i, q in enumerate(_real_quotes(10), 1):
-        cases.append(("quote", _tell(f"real-quote-{i}", "quote", "quote", quote=q), True))
-
-    # --- citations: 20 fabricated (reject) + real returned ids (keep) --------
-    for i in range(1, 21):
-        cases.append(("citation", _tell(f"fab-cite-{i}", "source", f"src{200 + i}"), False))
-    for sid in REAL_SOURCE_IDS:
-        cases.append(("citation", _tell(f"real-cite-{sid}", "source", sid), True))
-
-    return cases
+def _absent(quote: str, text: str) -> bool:
+    q = normalize(quote)
+    return re.search(rf"(?<![a-z0-9]){re.escape(q)}(?![a-z0-9])", normalize(text)) is None
 
 
-def build_archetype_cases() -> list[tuple[str, bool]]:
-    """(archetype_id, is_valid) — 15 out-of-taxonomy + valid controls."""
-    bogus = [f"archetype_fabricated_{i:02d}" for i in range(1, 16)]
-    cases = [(a, False) for a in bogus]
-    cases += [(a, True) for a in VALID_ARCHETYPES[:10]]
-    return cases
+def _windows(text: str, n: int) -> list[str]:
+    w = _words(text)
+    return [" ".join(w[i : i + n]) for i in range(0, max(len(w) - n + 1, 0))]
 
 
-def build_score_cases() -> list[Verdict]:
-    """15 verdicts that try to price a signal-heavy message below its floor."""
-    low_bands = [RiskLevel.info, RiskLevel.low, RiskLevel.medium]
+def _clean_windows(text: str, n: int) -> list[str]:
+    """Windows from sentences with no negator or conditional, so they can't be read as negated."""
     out = []
-    for i in range(15):
-        score = int(i * (max(FLOOR - 1, 1)) / 15)     # 0 .. floor-1
-        out.append(Verdict(risk_level=low_bands[i % 3], score=score,
-                           headline="(benchmark) model tries to downgrade",
-                           tells=[], reasoning="…"))
+    for sentence in re.split(r"(?<=[.!?])\s+|\n+", text):
+        if NEGATORS & {w.lower() for w in _words(sentence)}:
+            continue
+        out += _windows(sentence, n)
     return out
 
 
-# --------------------------------------------------------------------------- #
-#  Run + measure
-# --------------------------------------------------------------------------- #
-def _kept(tell: Tell) -> bool:
-    kept, _ = verify_tells([tell], SIGNALS, SOURCES, MESSAGE)
-    return len(kept) == 1
+def _fixtures(text: str, entities) -> list[Source]:
+    targets = [*entities.domains, *entities.phones, *entities.upi_ids]
+    sources = []
+    if targets:
+        e = targets[0]
+        snippet = f"Several people reported {e} in scam complaints this month, often after a text."
+        sources.append(
+            Source(
+                id="src1",
+                title="Community scam reports",
+                url="https://example.org/reports",
+                snippet=snippet,
+                about=e,
+                mentions=entities_mentioned(snippet, entities),
+            )
+        )
+    snippet = "Messages like this push people to act quickly and pay before checking anything."
+    sources.append(
+        Source(
+            id=f"src{len(sources) + 1}",
+            title="How pressure scams work",
+            url="https://example.org/pattern",
+            snippet=snippet,
+            about="pattern",
+            mentions=entities_mentioned(snippet, entities),
+        )
+    )
+    return sources
 
 
-def _pct(n: int, d: int) -> str:
-    return f"{(100 * n / d):.0f}%" if d else "n/a"
+def _t(
+    kind: str,
+    ref: str,
+    *,
+    title="Finding",
+    explanation="Seen in the message.",
+    quote="",
+    support="",
+):
+    return Tell(
+        title=title,
+        explanation=explanation,
+        evidence_type=kind,
+        evidence_ref=ref,
+        quote=quote,
+        support=support,
+    )
 
 
-def main() -> int:
-    tell_cases = build_tell_cases()
-    arch_cases = build_archetype_cases()
-    score_cases = build_score_cases()
+def build(substrates: list[Substrate], rng: random.Random) -> list[Case]:
+    vocab = signal_vocabulary()
+    cases: list[Case] = []
+    for sub in substrates:
+        sid, text = sub.sample.id, sub.text
+        fired = {s.id for s in sub.signals}
+        on_topic = next((s for s in sub.sources if s.about != "pattern"), None)
+        pattern = next(s for s in sub.sources if s.about == "pattern")
 
-    # Per-category correctness (a case is "correct" when kept == should_keep).
-    by_cat: dict[str, list[bool]] = {"signal": [], "quote": [], "citation": []}
-    fabricated_total = fabricated_rejected = 0
-    false_rejections = 0
-    for cat, tell, should_keep in tell_cases:
-        kept = _kept(tell)
-        by_cat[cat].append(kept == should_keep)
-        if not should_keep:                       # an adversarial (fabricated) claim
-            fabricated_total += 1
-            if not kept:
-                fabricated_rejected += 1
-        elif not kept:                            # a real claim wrongly dropped
-            false_rejections += 1
+        # ---- pointer --------------------------------------------------------------------
+        for ref in rng.sample([v for v in vocab if v not in fired], 2):
+            cases.append(
+                Case("pointer", "signal id that didn't fire", sid, False, _t("signal", ref))
+            )
+        missing = f"src{len(sub.sources) + 1}"
+        cases.append(
+            Case(
+                "pointer",
+                "source id not returned",
+                sid,
+                False,
+                _t("source", missing, support=" ".join(_words(pattern.snippet)[:6])),
+            )
+        )
+        windows = [w for w in _windows(text, 4) if len(w) > 12]
+        if windows:
+            words = rng.choice(windows).split()
+            words[1] = next(s for s in SWAPS if s not in normalize(text))
+            near = " ".join(words)
+            if _absent(near, text):
+                cases.append(
+                    Case("pointer", "near-miss quote", sid, False, _t("quote", "quote", quote=near))
+                )
+        other = rng.choice([s for s in substrates if s is not sub])
+        foreign = [w for w in _windows(other.text, 5) if _absent(w, text)]
+        if foreign:
+            cases.append(
+                Case(
+                    "pointer",
+                    "quote from another message",
+                    sid,
+                    False,
+                    _t("quote", "quote", quote=rng.choice(foreign)),
+                )
+            )
 
-    # Archetype integrity: bogus ids must collapse to "none"; valid ones must stay.
-    arch_correct = 0
-    for aid, is_valid in arch_cases:
-        result = verify_archetype(ArchetypeMatch(
-            archetype_id=aid, name="x", confidence=0.5, rationale="x", matched_tells=[]))
-        ok = (result.archetype_id == aid) if is_valid else (result.archetype_id == "none")
-        arch_correct += ok
-    bogus_total = sum(1 for _, v in arch_cases if not v)
-    bogus_forced = sum(
-        1 for aid, v in arch_cases if not v
-        and verify_archetype(ArchetypeMatch(archetype_id=aid, name="x", confidence=0.5,
-                                            rationale="x", matched_tells=[])).archetype_id == "none")
+        # ---- support --------------------------------------------------------------------
+        low = normalize(text)
+        for m in re.finditer(
+            r"\b(?:do not|don't|never|not|no)\s+((?:[a-z0-9']+\s+){1,3}[a-z0-9']+)", low
+        ):
+            q = m.group(1)
+            if {"if", "unless"} & set(low[: m.start()].split()[-2:]):
+                continue  # "if not done by you" is a condition, and verify.py treats it as one
+            if (
+                len(re.findall(rf"(?<![a-z0-9]){re.escape(q)}(?![a-z0-9])", low)) == 1
+                and len(q) >= 6
+            ):
+                cases.append(
+                    Case(
+                        "support",
+                        "quote used only in the negative",
+                        sid,
+                        False,
+                        _t("quote", "quote", quote=q),
+                    )
+                )
+                break
+        long_words = [w for w in _words(text) if len(w) >= 4 and w.isalpha()]
+        if long_words:
+            cases.append(
+                Case(
+                    "support",
+                    "one-word quote",
+                    sid,
+                    False,
+                    _t("quote", "quote", quote=rng.choice(long_words)),
+                )
+            )
+        cases.append(
+            Case(
+                "support",
+                "excerpt not in the cited source",
+                sid,
+                False,
+                _t(
+                    "source",
+                    pattern.id,
+                    support="this site has stolen money from hundreds of people",
+                ),
+            )
+        )
+        excerpt = " ".join(_words(pattern.snippet)[3:9])
+        if on_topic:
+            cases.append(
+                Case(
+                    "support",
+                    "named link or number, off-topic source",
+                    sid,
+                    False,
+                    _t(
+                        "source",
+                        pattern.id,
+                        title="Reported before",
+                        explanation=f"{on_topic.about} has been reported by other people.",
+                        support=excerpt,
+                    ),
+                )
+            )
+        if sub.signals:
+            title, expl = rng.choice(OUTSIDE_CLAIMS)
+            cases.append(
+                Case(
+                    "support",
+                    "outside confirmation on a detector signal",
+                    sid,
+                    False,
+                    _t("signal", rng.choice(sub.signals).id, title=title, explanation=expl),
+                )
+            )
 
-    # Risk-floor violations: after reconciliation, a verdict must never sit below
-    # the floor, nor carry a band lower than its (clamped) score implies.
-    floor_violations = 0
-    for v in score_cases:
-        fixed = reconcile_verdict(v, [], FLOOR)
-        below_floor = fixed.score < FLOOR
-        band_too_low = _band_order(fixed.risk_level) < _band_order(_band(fixed.score))
-        if below_floor or band_too_low:
-            floor_violations += 1
+        # ---- controls -------------------------------------------------------------------
+        for s in sub.signals:
+            cases.append(
+                Case(
+                    "control",
+                    "real signal",
+                    sid,
+                    True,
+                    _t("signal", s.id, title=s.label, explanation=s.detail),
+                )
+            )
+        clean = [w for w in _clean_windows(text, 3) if len(w) >= 8]
+        for q in rng.sample(clean, min(2, len(clean))):
+            cases.append(Case("control", "real quote", sid, True, _t("quote", "quote", quote=q)))
+        if on_topic:
+            cases.append(
+                Case(
+                    "control",
+                    "excerpt from the matching source",
+                    sid,
+                    True,
+                    _t(
+                        "source",
+                        on_topic.id,
+                        title="Reported before",
+                        explanation=f"{on_topic.about} appears in recent scam complaints.",
+                        support=" ".join(_words(on_topic.snippet)[:6]),
+                    ),
+                )
+            )
+        cases.append(
+            Case(
+                "control",
+                "pattern-level excerpt",
+                sid,
+                True,
+                _t(
+                    "source",
+                    pattern.id,
+                    title="Known pressure tactic",
+                    explanation="Messages of this kind rely on rushing the reader.",
+                    support=excerpt,
+                ),
+            )
+        )
+    return cases
 
-    sig, quo, cit = by_cat["signal"], by_cat["quote"], by_cat["citation"]
+
+def run(json_path: str | None) -> int:
+    rng = random.Random(SEED)
+    substrates = []
+    for sample in [*SAMPLES, *ADVERSARIAL, *HARD_NEGATIVES]:
+        entities, signals = run_detectors(sample.text)
+        sub = Substrate(sample, sample.text, entities, signals, signal_score(signals))
+        sub.sources = _fixtures(sample.text, entities)
+        substrates.append(sub)
+
+    results: Counter = Counter()
+    wrong: list[str] = []
+    by_sub = {s.sample.id: s for s in substrates}
+    for case in build(substrates, rng):
+        sub = by_sub[case.substrate]
+        kept, rejected = verify_tells([case.tell], sub.signals, sub.sources, sub.text, sub.entities)
+        ok = (len(kept) == 1) == case.should_keep
+        results[(case.family, case.kind, "n")] += 1
+        results[(case.family, case.kind, "ok")] += ok
+        if not ok:
+            got = rejected[0].code if rejected else "kept"
+            wrong.append(
+                f"{case.substrate}: {case.kind} -> {got} ({case.tell.quote or case.tell.support or case.tell.evidence_ref})"
+            )
+
+    valid = sorted(archetype_ids())
+    for aid in [a for a in BOGUS_ARCHETYPES if a not in valid]:
+        m = verify_archetype(
+            ArchetypeMatch(
+                archetype_id=aid, name="x", confidence=0.9, rationale="x", matched_tells=[]
+            )
+        )
+        results[("taxonomy", "archetype not in catalogue", "n")] += 1
+        results[("taxonomy", "archetype not in catalogue", "ok")] += m.archetype_id == "none"
+    for aid in valid:
+        m = verify_archetype(
+            ArchetypeMatch(
+                archetype_id=aid, name="x", confidence=0.9, rationale="x", matched_tells=[]
+            )
+        )
+        results[("control", "catalogue archetype", "n")] += 1
+        results[("control", "catalogue archetype", "ok")] += m.archetype_id == aid
+
+    for sub in substrates:
+        if sub.floor == 0:
+            continue
+        for score in sorted({0, sub.floor // 2, sub.floor - 1}):
+            v = Verdict(
+                risk_level=RiskLevel.info,
+                score=score,
+                headline="looks fine",
+                tells=[],
+                reasoning="-",
+            )
+            fixed = reconcile_verdict(v, [], sub.floor)
+            ok = (
+                fixed.score >= sub.floor
+                and BAND_ORDER[fixed.risk_level] >= BAND_ORDER[risk_band(fixed.score)]
+            )
+            results[("floor", "score below the detector floor", "n")] += 1
+            results[("floor", "score below the detector floor", "ok")] += ok
+
+    rows = sorted(
+        {(f, k) for f, k, _ in results},
+        key=lambda x: ("pointer support taxonomy floor control".split().index(x[0]), x[1]),
+    )
+    adv_n = sum(results[(f, k, "n")] for f, k in rows if f != "control")
+    adv_ok = sum(results[(f, k, "ok")] for f, k in rows if f != "control")
+    ctl_n = sum(results[(f, k, "n")] for f, k in rows if f == "control")
+    ctl_ok = sum(results[(f, k, "ok")] for f, k in rows if f == "control")
 
     print("Evidence Integrity Benchmark")
-    print(f"  substrate message  : delivery_sms   (risk floor = {FLOOR})")
-    print(f"  real signals       : {REAL_SIGNAL_IDS}")
-    print(f"  adversarial cases  : {fabricated_total + 15 + 15} "
-          f"(70 fabricated claims, 15 bad archetypes, 15 score-manipulations)")
-    print(f"  control cases      : {sum(1 for _, _, k in tell_cases if k) + 10} grounded claims\n")
+    print(f"  substrates: {len(substrates)} messages (samples, adversarial set, hard negatives)")
+    print(f"  cases: {adv_n} adversarial, {ctl_n} controls, seed {SEED}\n")
+    print(f"  {'family':<9}{'case':<44}{'correct':>12}")
+    print("  " + "-" * 65)
+    for f, k in rows:
+        n, ok = results[(f, k, "n")], results[(f, k, "ok")]
+        print(f"  {f:<9}{k:<44}{f'{ok}/{n}':>12}")
+    print("  " + "-" * 65)
+    print(f"  adversarial cases handled correctly  {adv_ok}/{adv_n}")
+    print(f"  controls kept                        {ctl_ok}/{ctl_n}")
+    for line in wrong[:20]:
+        print("  MISJUDGED", line)
+    passed = adv_ok == adv_n and ctl_ok == ctl_n
+    print("\n  " + ("PASS" if passed else "FAIL") + ": every case judged as expected." * passed)
 
-    print(f"  {'metric':<26}{'result':<10}{'detail'}")
-    print("  " + "-" * 62)
-    print(f"  {'Claim rejection rate':<26}{_pct(fabricated_rejected, fabricated_total):<10}"
-          f"{fabricated_rejected}/{fabricated_total} fabricated claims rejected")
-    print(f"  {'Signal grounding':<26}{_pct(sum(sig), len(sig)):<10}{sum(sig)}/{len(sig)} correct")
-    print(f"  {'Quote fidelity':<26}{_pct(sum(quo), len(quo)):<10}{sum(quo)}/{len(quo)} correct")
-    print(f"  {'Citation validity':<26}{_pct(sum(cit), len(cit)):<10}{sum(cit)}/{len(cit)} correct")
-    print(f"  {'Archetype integrity':<26}{_pct(bogus_forced, bogus_total):<10}"
-          f"{bogus_forced}/{bogus_total} bogus archetypes forced to 'none'")
-    print(f"  {'Risk-floor violations':<26}{floor_violations:<10}"
-          f"out of {len(score_cases)} score-manipulation attempts")
-    print(f"  {'False rejections':<26}{false_rejections:<10}genuinely-grounded claims wrongly dropped")
-
-    ok = (fabricated_rejected == fabricated_total
-          and false_rejections == 0
-          and floor_violations == 0
-          and bogus_forced == bogus_total
-          and all(sig) and all(quo) and all(cit)
-          and arch_correct == len(arch_cases))
-    print("\n  " + ("PASS — the evidence invariant held against every adversarial case."
-                    if ok else "FAIL — an adversarial claim got through; see the rows above."))
-    return 0 if ok else 1
-
-
-def _band_order(level: RiskLevel) -> int:
-    order = {RiskLevel.info: 0, RiskLevel.low: 1, RiskLevel.medium: 2,
-             RiskLevel.high: 3, RiskLevel.critical: 4}
-    return order[level]
+    if json_path:
+        Path(json_path).write_text(
+            json.dumps(
+                {
+                    "seed": SEED,
+                    "substrates": len(substrates),
+                    "adversarial": {"n": adv_n, "correct": adv_ok},
+                    "controls": {"n": ctl_n, "correct": ctl_ok},
+                    "rows": [
+                        {
+                            "family": f,
+                            "case": k,
+                            "n": results[(f, k, "n")],
+                            "correct": results[(f, k, "ok")],
+                        }
+                        for f, k in rows
+                    ],
+                    "misjudged": wrong,
+                },
+                indent=2,
+            )
+        )
+    return 0 if passed else 1
 
 
 if __name__ == "__main__":
-    raise SystemExit(main())
+    ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+    ap.add_argument("--json", help="also write the results to this file")
+    raise SystemExit(run(ap.parse_args().json))

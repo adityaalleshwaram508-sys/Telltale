@@ -6,27 +6,31 @@
 #   2. If a link's domain is a near-miss of a genuine domain (edit distance /
 #      homoglyph), that's a look-alike signal.
 #
-# Not exhaustive — it doesn't need to be. It just needs to cover the names that
-# scammers lean on most, weighted toward global services plus India (our first
-# target market).
+# Not exhaustive. It covers the names scammers lean on most, weighted toward global
+# services plus India (the first target market). Indian banks are flagged indian_bank:
+# links under RBI's bank-only .bank.in suffix count as theirs without listing each one.
 
 brands:
   # Banks / payments
   - name: PayPal
-    domains: [paypal.com]
+    domains: [paypal.com, paypal.me]
     keywords: [paypal]
   - name: State Bank of India
     domains: [onlinesbi.sbi, sbi.co.in]
     keywords: [sbi, state bank]
+    indian_bank: true
   - name: HDFC Bank
     domains: [hdfcbank.com]
-    keywords: [hdfc]
+    keywords: [hdfc, hdfcbank]
+    indian_bank: true
   - name: ICICI Bank
     domains: [icicibank.com]
-    keywords: [icici]
+    keywords: [icici, icicibank]
+    indian_bank: true
   - name: Axis Bank
     domains: [axisbank.com]
     keywords: [axis bank]
+    indian_bank: true
   - name: Chase
     domains: [chase.com]
     keywords: [chase]
@@ -50,22 +54,23 @@ brands:
     domains: [apple.com, icloud.com]
     keywords: [apple, icloud, apple id]
   - name: Microsoft
-    domains: [microsoft.com, live.com, outlook.com]
-    keywords: [microsoft, windows, outlook]
+    domains: [microsoft.com, live.com, outlook.com, office.com]
+    # not bare "windows": "close the windows" is not Microsoft
+    keywords: [microsoft, outlook, windows defender, windows security, microsoft 365, office 365]
   - name: Google
-    domains: [google.com, gmail.com]
+    domains: [google.com, google.co.in, gmail.com, youtube.com]
     keywords: [google, gmail]
   - name: Meta / Facebook
-    domains: [facebook.com, meta.com, instagram.com]
+    domains: [facebook.com, fb.com, meta.com, instagram.com]
     keywords: [facebook, instagram, meta]
   - name: WhatsApp
-    domains: [whatsapp.com]
+    domains: [whatsapp.com, wa.me]
     keywords: [whatsapp]
   - name: Netflix
     domains: [netflix.com]
     keywords: [netflix]
   - name: Amazon
-    domains: [amazon.com, amazon.in]
+    domains: [amazon.com, amazon.in, amazon.co.uk, amazon.ca, amazon.com.au, amazon.de]
     keywords: [amazon]
 
   # Couriers / logistics
@@ -99,8 +104,7 @@ brands:
     domains: [ssa.gov]
     keywords: [social security, ssa]
 
-# Payment-app / wallet keywords used to spot when someone is being pushed onto a
-# hard-to-reverse rail. Feeds the payments detector.
+# TLDs disproportionately used by throwaway scam sites.
 suspicious_tlds:
   - .top
   - .xyz
@@ -127,3 +131,5 @@ url_shorteners:
   - shorturl.at
   - t.ly
   - rebrand.ly
+  - tiny.cc
+  - ow.ly

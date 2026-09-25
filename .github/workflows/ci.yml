@@ -1,8 +1,5 @@
 name: CI
 
-# Runs the unit tests and both evaluation gates on every push and PR. No API key
-# is needed: the tests stub the model, and the evals run in deterministic mode —
-# so a green check here verifies the safety layer, not a lucky model call.
 on:
   push:
     branches: [main]
@@ -11,7 +8,7 @@ on:
 
 jobs:
   verify:
-    name: tests + evidence checks
+    name: lint, tests, evals
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -20,15 +17,30 @@ jobs:
         with:
           python-version: "3.11"
           cache: pip
+          cache-dependency-path: requirements*.txt
 
       - name: Install dependencies
-        run: pip install -r requirements.txt
+        run: pip install -r requirements-dev.txt
+
+      - name: Lint
+        run: |
+          ruff check .
+          ruff format --check .
 
       - name: Unit tests
         run: python -m pytest -q
 
-      - name: Detection eval (gates on 0 false positives)
-        run: python eval/detection.py
+      # Both evals run without API keys. detection.py exits non-zero on any
+      # false positive; grounding.py exits non-zero if any case is misjudged.
+      - name: Detection eval
+        run: python eval/detection.py --json detection.json
 
-      - name: Evidence Integrity Benchmark (gates on 100% claim rejection, 0 floor violations)
-        run: python eval/grounding.py
+      - name: Evidence Integrity Benchmark
+        run: python eval/grounding.py --json grounding.json
+
+      - name: Keep eval results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: eval-results
+          path: "*.json"

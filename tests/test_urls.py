@@ -8,7 +8,7 @@ def _ids(text):
 
 
 def test_lookalike_domain():
-    ids, _ = _ids("Login now at http://paypa1.com/secure")   # 1 -> l lookalike
+    ids, _ = _ids("Login now at http://paypa1.com/secure")  # 1 -> l lookalike
     assert "url.lookalike" in ids
 
 

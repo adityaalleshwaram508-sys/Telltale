@@ -3,8 +3,11 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>Telltale — is it a scam?</title>
-<meta name="description" content="Paste anything suspicious. See the tells, the proof, and what to do — before you pay, click, or reply." />
+<title>Telltale: is it a scam?</title>
+<meta name="description" content="Paste anything suspicious. See the tells, the proof, and what to do before you pay, click, or reply." />
+<meta name="theme-color" content="#0b0f17" />
+<link rel="manifest" href="/manifest.json" />
+<link rel="apple-touch-icon" href="/icon-192.png" />
 <link rel="preconnect" href="https://fonts.googleapis.com" />
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
@@ -51,12 +54,16 @@
     <div class="thumb" id="thumb" style="display:none"></div>
 
     <div class="samples">
-      <div class="lbl">…or try one of these real-world examples:</div>
+      <div class="lbl">Or try one of these real-world examples</div>
       <div class="chips" id="samples"></div>
     </div>
 
+    <p class="privacy">What you paste is sent to Nebius Token Factory for analysis, and any link,
+      phone number or UPI ID in it is looked up with Tavily. Telltale keeps it in memory for up to
+      15 minutes to answer repeat checks and doesn't store it anywhere.</p>
+
     <div class="samples challenge">
-      <div class="lbl">Challenge Telltale — adversarial messages built to fool a naive classifier (click to run):</div>
+      <div class="lbl">Challenge Telltale with messages built to fool a naive classifier. Click one to run it.</div>
       <div class="chips" id="adversarial"></div>
     </div>
   </div>
@@ -68,8 +75,8 @@
   <div class="result" id="result"></div>
 
   <footer>
-    Built for the Nebius × NVIDIA Global AI Hackathon · reasoning by <b>NVIDIA Nemotron</b> on
-    <b>Nebius Token Factory</b> · live checks by <b>Tavily</b>.<br/>
+    Reasoning by <b>NVIDIA Nemotron</b> on <b>Nebius Token Factory</b>. Live checks by <b>Tavily</b>.
+    Built for the Nebius x NVIDIA Global AI Hackathon.<br/>
     Telltale is a safety aid, not legal or financial advice.
   </footer>
 </div>

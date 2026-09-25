@@ -239,3 +239,20 @@ select { padding-right: 8px; }
 footer { text-align: center; color: var(--muted); font-size: 0.8rem; margin-top: 40px; }
 footer a { color: var(--accent); text-decoration: none; }
 .err-banner { color: var(--high); border: 1px solid var(--high); border-radius: 10px; padding: 12px; margin-top: 14px; display: none; }
+
+/* ---------- evidence detail, privacy note, run trace ---------- */
+.tell .t-src { color: var(--muted); font-size: 0.82rem; margin-top: 6px; overflow-wrap: anywhere; }
+.tell .t-src a, .refs a, .r-meta a, .source a { color: var(--accent-2); text-decoration: none; }
+.source .s-about { color: var(--accent); font-size: 0.78rem; margin-top: 3px; }
+.box .why { color: var(--muted); font-size: 0.86rem; }
+.privacy { color: var(--muted); font-size: 0.8rem; margin: 12px 2px 0; line-height: 1.45; }
+.trace { margin-top: 18px; border: 1px solid var(--border); border-radius: 10px; background: var(--panel-2); padding: 10px 14px; font-size: 0.85rem; }
+.trace summary { cursor: pointer; color: var(--muted); }
+.trace summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; border-radius: 4px; }
+.trace-wrap { overflow-x: auto; margin-top: 10px; }
+.trace table { width: 100%; border-collapse: collapse; }
+.trace th, .trace td { text-align: left; padding: 5px 8px; border-bottom: 1px solid var(--border); white-space: nowrap; }
+.trace th { color: var(--muted); font-weight: 600; }
+.trace td.num { text-align: right; font-variant-numeric: tabular-nums; }
+.trace tr.fail td { color: var(--high); }
+.trace-note { color: var(--muted); font-size: 0.8rem; margin-top: 8px; }

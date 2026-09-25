@@ -1,125 +1,223 @@
-"""Live verification via Tavily.
+"""Live checks with Tavily.
 
-The deterministic detectors know *patterns*; they can't know that a specific
-domain, phone number, or "investment platform" has already been reported by other
-victims or flagged by a regulator this year. That's what Tavily is for.
+Detectors know patterns. They can't know that a particular link, number or UPI handle was
+reported by other people this year. Research covers that in two tiers.
 
-Design choices that keep it honest and cheap:
-  * Queries are year-aware ("... scam 2026") so fresh reports rank first.
-  * We only look up things worth looking up — an unfamiliar domain, a phone/UPI
-    handle, a claimed company — never burn a search on google.com.
-  * Every result becomes a Source with a stable id the verdict can cite. If a
-    claim can't point at a returned source, it doesn't get to use Tavily as
-    backing.
-  * No key? We say so in the coverage notes instead of pretending we checked.
+  entity   exact-match searches for the message's own link, phone number or UPI handle,
+           so a result only comes back if it names that thing
+  pattern  when there's nothing specific to look up, one search on the claimed sender;
+           verify.py lets these results back general claims only
+
+The suspect domain is excluded from its own results, so the scam site can never be cited as
+evidence about itself. Searches run concurrently and each one is recorded in the run trace.
 """
+
 from __future__ import annotations
 
-import datetime as _dt
+import asyncio
+import datetime as dt
+import re
+import time
+from typing import NamedTuple
 
 import httpx
 
 from backend.config import get_settings
+from backend.detectors.domains import is_bank_in, is_ip, registrable_domain
+from backend.detectors.entities import entities_mentioned
 from backend.knowledge import genuine_domains
-from backend.schemas import Entities, Source
+from backend.schemas import Entities, Source, TraceEntry
 
-_ENDPOINT = "https://api.tavily.com/search"
+ENDPOINT = "https://api.tavily.com/search"
+MAX_RESULTS = 5
+
+_COUNTRY = {
+    "IN": "india",
+    "US": "united states",
+    "GB": "united kingdom",
+    "AU": "australia",
+    "CA": "canada",
+    "SG": "singapore",
+}
+# Claimed senders too generic to search for: the results would be news, not reports.
+_GENERIC_SENDERS = (
+    "police",
+    "cyber crime",
+    "crime branch",
+    "cybercrime",
+    "government",
+    "bank",
+    "court",
+    "customs",
+    "income tax",
+    "tax department",
+    "rbi",
+    "department",
+    "officer",
+    "inspector",
+    "agency",
+    "helpline",
+    "unknown",
+)
 
 
-def _year() -> int:
-    return _dt.date.today().year
+class Query(NamedTuple):
+    text: str
+    about: str  # the entity searched for, or "pattern"
+    exact: bool
+    exclude: tuple[str, ...] = ()
 
 
-async def _search(query: str, *, max_results: int = 5, depth: str = "basic") -> list[dict]:
+class Research(NamedTuple):
+    sources: list[Source]
+    notes: list[str]
+    queries: list[str]
+    trace: list[TraceEntry]
+    failed: bool
+
+
+def _phone_key(phone: str) -> str:
+    digits = re.sub(r"\D", "", phone)
+    return digits[-10:] if len(digits) == 12 and digits.startswith("91") else digits
+
+
+def plan_queries(entities: Entities, claimed_sender: str) -> list[Query]:
+    """At most three look-ups: an unfamiliar domain, a phone number, a UPI handle."""
+    year = dt.date.today().year
+    genuine = genuine_domains()
+    queries: list[Query] = []
+    for host in entities.domains:
+        reg = registrable_domain(host)
+        if is_ip(host) or is_bank_in(host) or reg in genuine or host in genuine:
+            continue
+        queries.append(
+            Query(f'"{host}" scam OR fraud OR phishing OR complaint {year}', host, True, (reg,))
+        )
+        break
+    if entities.phones:
+        queries.append(
+            Query(
+                f'"{_phone_key(entities.phones[0])}" scam OR fraud OR spam',
+                entities.phones[0],
+                True,
+            )
+        )
+    if entities.upi_ids:
+        queries.append(Query(f'"{entities.upi_ids[0]}" scam OR fraud', entities.upi_ids[0], True))
+    sender = (claimed_sender or "").strip()
+    if not queries and sender and not any(g in sender.lower() for g in _GENERIC_SENDERS):
+        queries.append(Query(f'"{sender}" scam OR fraud warning {year}', "pattern", False))
+    return queries[:3]
+
+
+def _payload(q: Query, region: str | None, depth: str) -> dict:
+    payload: dict = {
+        "query": q.text,
+        "search_depth": depth,
+        "max_results": MAX_RESULTS,
+        "topic": "general",
+        "include_usage": True,
+    }
+    if q.exact:
+        payload["exact_match"] = True
+    if q.exclude:
+        payload["exclude_domains"] = list(q.exclude)
+    if region and region.upper() in _COUNTRY:
+        payload["country"] = _COUNTRY[region.upper()]
+    return payload
+
+
+async def _search(
+    client: httpx.AsyncClient, q: Query, region: str | None
+) -> tuple[dict, TraceEntry]:
     s = get_settings()
     headers = {"Authorization": f"Bearer {s.tavily_api_key}"}
-    payload = {
-        "query": query,
-        "search_depth": depth,
-        "max_results": max_results,
-        "topic": "general",
-    }
-    async with httpx.AsyncClient(timeout=s.tavily_timeout) as client:
-        r = await client.post(_ENDPOINT, json=payload, headers=headers)
+    started = time.perf_counter()
+    note = ""
+    try:
+        r = await client.post(ENDPOINT, json=_payload(q, region, s.tavily_depth), headers=headers)
+        if r.status_code == 400:
+            # Fall back to the plain request if an optional parameter is refused.
+            note = "optional parameters refused; retried plain"
+            plain = {"query": q.text, "search_depth": s.tavily_depth, "max_results": MAX_RESULTS}
+            r = await client.post(ENDPOINT, json=plain, headers=headers)
         r.raise_for_status()
-        return r.json().get("results", [])
-
-
-def _plan_queries(entities: Entities, claimed_sender: str, region_hint: str | None) -> list[str]:
-    """Decide the handful of look-ups worth doing for this message."""
-    year = _year()
-    genuine = genuine_domains()
-    queries: list[str] = []
-
-    # Unfamiliar domains are the highest-value thing to verify.
-    for host in entities.domains:
-        core = ".".join(host.split(".")[-2:])
-        if core in genuine or host in genuine:
-            continue
-        queries.append(f'"{host}" scam OR fraud OR phishing OR complaint {year}')
-        break  # one domain look-up is usually enough for a single message
-
-    # Phone numbers and UPI handles are widely reported by other victims.
-    if entities.phones:
-        queries.append(f'"{entities.phones[0]}" scam OR fraud OR spam report')
-    if entities.upi_ids:
-        queries.append(f'"{entities.upi_ids[0]}" scam OR fraud')
-
-    # A named company/platform with no domain is worth checking — but skip generic
-    # authority roles ("cyber crime branch", "police", a bank), which just return
-    # news and dilute the evidence. Those are better judged by the tells.
-    generic = ("police", "cyber crime", "crime branch", "cybercrime", "government",
-               "bank", "court", "customs", "income tax", "tax department", "rbi",
-               "department", "officer", "inspector", "agency", "helpline", "unknown")
-    if not queries and claimed_sender:
-        cs = claimed_sender.lower().strip()
-        if cs and not any(g in cs for g in generic):
-            loc = f" {region_hint}" if region_hint else ""
-            queries.append(f'"{claimed_sender}" scam OR legit OR review{loc} {year}')
-
-    return queries[:3]     # keep latency and credit spend in check
+        data = r.json()
+        ok = True
+    except (httpx.HTTPError, ValueError) as exc:
+        data, ok, note = {}, False, type(exc).__name__
+    entry = TraceEntry(
+        kind="search",
+        stage="research",
+        name="tavily",
+        detail=q.text,
+        ms=int((time.perf_counter() - started) * 1000),
+        results=len(data.get("results", [])),
+        credits=float((data.get("usage") or {}).get("credits", 0) or 0),
+        ok=ok,
+        note=note,
+    )
+    return data, entry
 
 
 async def gather_evidence(
-    entities: Entities, claimed_sender: str, region_hint: str | None
-) -> tuple[list[Source], list[str], list[str]]:
-    """Returns (sources, coverage_notes, queries_run)."""
+    entities: Entities,
+    claimed_sender: str,
+    region: str | None,
+    *,
+    client: httpx.AsyncClient | None = None,
+) -> Research:
     s = get_settings()
     if not s.has_tavily:
-        return [], ["Live verification skipped — no Tavily API key configured, so "
-                    "reputation of the links/numbers wasn't checked online."], []
+        note = (
+            "Live verification skipped: no Tavily API key is configured, so the links and "
+            "numbers weren't checked online."
+        )
+        return Research([], [note], [], [], False)
 
-    queries = _plan_queries(entities, claimed_sender, region_hint)
+    queries = plan_queries(entities, claimed_sender)
     if not queries:
-        return [], ["Nothing external to verify (no unfamiliar links, numbers, or "
-                    "named company in the message)."], []
+        note = "Nothing external to verify (no unfamiliar links, numbers, or named company)."
+        return Research([], [note], [], [], False)
 
+    owns_client = client is None
+    client = client or httpx.AsyncClient(timeout=s.tavily_timeout)
+    try:
+        replies = await asyncio.gather(*(_search(client, q, region) for q in queries))
+    finally:
+        if owns_client:
+            await client.aclose()
+
+    suspects = {registrable_domain(d) for d in entities.domains}
     sources: list[Source] = []
-    seen_urls: set[str] = set()
     notes: list[str] = []
-
-    for q in queries:
-        try:
-            results = await _search(q, depth="advanced", max_results=5)
-        except Exception as e:
-            notes.append(f"A live check failed ({type(e).__name__}); treat the online "
-                         f"reputation as unknown, not clear.")
+    seen: set[str] = set()
+    for q, (data, entry) in zip(queries, replies, strict=True):
+        if not entry.ok:
+            notes.append(
+                f"A live check failed ({entry.note}); treat the online reputation as unknown, not clear."
+            )
             continue
-        for r in results:
-            url = r.get("url", "")
-            if not url or url in seen_urls:
+        for r in data.get("results", []):
+            url = r.get("url") or ""
+            host = re.sub(r"^https?://", "", url).split("/")[0].lower()
+            if not url or url in seen or (host and registrable_domain(host) in suspects):
                 continue
-            seen_urls.add(url)
-            snippet = (r.get("content") or "").strip().replace("\n", " ")
-            sources.append(Source(
-                id=f"src{len(sources) + 1}",
-                title=(r.get("title") or url)[:200],
-                url=url,
-                snippet=snippet[:500],
-                score=r.get("score"),
-            ))
-
+            seen.add(url)
+            title = (r.get("title") or url)[:200]
+            snippet = " ".join((r.get("content") or "").split())[:500]
+            sources.append(
+                Source(
+                    id=f"src{len(sources) + 1}",
+                    title=title,
+                    url=url,
+                    snippet=snippet,
+                    score=r.get("score"),
+                    about=q.about,
+                    mentions=entities_mentioned(f"{title} {snippet}", entities),
+                )
+            )
     if not sources and not notes:
-        notes.append("Live search returned nothing on the links/numbers — no public "
-                     "reports either way.")
-    return sources, notes, queries
+        notes.append("Live search found no public reports on these links or numbers, either way.")
+    failed = any(not e.ok for _, e in replies)
+    return Research(sources, notes, [q.text for q in queries], [e for _, e in replies], failed)

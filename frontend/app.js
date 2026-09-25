@@ -1,87 +1,120 @@
 "use strict";
 
 const STEPS = [
-  ["ingest",   "Reading input"],
-  ["detect",   "Scanning for red flags"],
-  ["context",  "Understanding the message"],
+  ["ingest", "Reading input"],
+  ["detect", "Scanning for red flags"],
+  ["context", "Understanding the message"],
   ["classify", "Matching scam patterns"],
-  ["research", "Live-checking links & numbers"],
-  ["verdict",  "Weighing the evidence"],
-  ["action",   "Preparing your next steps"],
+  ["research", "Live-checking links and numbers"],
+  ["verdict", "Weighing the evidence"],
+  ["action", "Preparing your next steps"],
 ];
 
+const STAGE_NAMES = {
+  vision: "Read screenshot",
+  context: "Understand message",
+  classify: "Match pattern",
+  research: "Live search",
+  verdict: "Weigh evidence",
+  second_opinion: "Second opinion",
+  action: "Next steps",
+};
+
 const RISK = {
-  critical: { color: "#ff5a5f", label: "Critical — almost certainly a scam" },
-  high:     { color: "#ff8c42", label: "High — likely a scam" },
-  medium:   { color: "#ffcf4d", label: "Suspicious — verify before acting" },
-  low:      { color: "#52c07a", label: "Low — probably legitimate" },
-  info:     { color: "#7f8da3", label: "No strong scam signals found" },
+  critical: { color: "#ff5a5f", label: "Critical, almost certainly a scam" },
+  high: { color: "#ff8c42", label: "High, likely a scam" },
+  medium: { color: "#ffcf4d", label: "Suspicious, verify before acting" },
+  low: { color: "#52c07a", label: "Low, probably legitimate" },
+  info: { color: "#7f8da3", label: "No strong scam signals found" },
 };
 
 const $ = (sel) => document.querySelector(sel);
 let pickedFile = null;
 
-// tiny DOM helper — text goes in as textContent so scam strings can't inject markup
+// Builds elements with textContent only. Message text, model output and search results are
+// untrusted, so none of it is ever parsed as HTML.
 function el(tag, opts = {}, ...kids) {
   const n = document.createElement(tag);
   if (opts.class) n.className = opts.class;
   if (opts.text != null) n.textContent = opts.text;
-  if (opts.html != null) n.innerHTML = opts.html;
   if (opts.attrs) for (const [k, v] of Object.entries(opts.attrs)) n.setAttribute(k, v);
-  for (const k of kids) if (k) n.append(k);
+  for (const k of kids) if (k != null && k !== "") n.append(k);
   return n;
+}
+
+// Only http(s) links become clickable; anything else (javascript:, data:) is shown as text.
+function link(url, text) {
+  let href = null;
+  try {
+    const u = new URL(url, location.href);
+    if (u.protocol === "https:" || u.protocol === "http:") href = u.href;
+  } catch {
+    /* not a URL */
+  }
+  if (!href) return el("span", { text: text || String(url) });
+  return el("a", { text: text || href, attrs: { href, target: "_blank", rel: "noopener noreferrer" } });
+}
+
+function fmtMs(ms) {
+  return ms >= 1000 ? `${(ms / 1000).toFixed(1)}s` : `${ms}ms`;
 }
 
 // ---------- boot ----------
 async function boot() {
+  if ("serviceWorker" in navigator) navigator.serviceWorker.register("/sw.js").catch(() => {});
+
   try {
     const h = await (await fetch("/api/health")).json();
-    const caps = $("#caps");
     const c = h.capabilities || {};
-    caps.append(
+    $("#caps").append(
       pill(!!c.reasoning_model, "Reasoning", c.reasoning_model || "no model key"),
       pill(!!c.vision_model, "Vision", c.vision_model || "off"),
       pill(!!c.live_research, "Live research", c.live_research ? "Tavily" : "off (no key)"),
     );
-    if (h.note) caps.append(el("span", { class: "pill off", text: h.note }));
-  } catch (e) { /* health is best-effort */ }
+    if (h.note) $("#caps").append(el("span", { class: "pill off", text: h.note }));
+  } catch {
+    /* health is best-effort */
+  }
 
-  try {
-    const samples = await (await fetch("/api/samples")).json();
-    const box = $("#samples");
-    for (const s of samples) {
-      const chip = el("button", { class: "chip", text: s.label });
-      chip.onclick = () => loadSample(s.id);
-      box.append(chip);
-    }
-  } catch (e) { /* ignore */ }
+  await chips("/api/samples", "#samples", "chip", (s) => loadSample(s.id));
+  await chips("/api/adversarial", "#adversarial", "chip chip-adv", (s) => loadSampleAndRun(s.id));
 
+  // Android share sheet: an installed Telltale receives ?text=&url=&title=.
+  const p = new URLSearchParams(location.search);
+  const shared = ["title", "text", "url"].map((k) => p.get(k)).filter(Boolean).join("\n").trim();
+  if (shared) {
+    $("#input").value = shared;
+    history.replaceState(null, "", "/");
+    run();
+  }
+}
+
+async function chips(endpoint, target, cls, onClick) {
   try {
-    const adv = await (await fetch("/api/adversarial")).json();
-    const box = $("#adversarial");
-    for (const s of adv) {
-      const chip = el("button", { class: "chip chip-adv", text: s.label });
-      chip.onclick = () => loadSampleAndRun(s.id);
-      box.append(chip);
+    for (const s of await (await fetch(endpoint)).json()) {
+      const chip = el("button", { class: cls, text: s.label });
+      chip.onclick = () => onClick(s);
+      $(target).append(chip);
     }
-  } catch (e) { /* ignore */ }
+  } catch {
+    /* examples are optional */
+  }
 }
 
 function pill(on, name, val) {
-  return el("span", { class: "pill " + (on ? "on" : "off"),
-    html: `<b>${name}:</b> ${escapeHtml(val)}` });
+  return el("span", { class: "pill " + (on ? "on" : "off") }, el("b", { text: name }), " " + val);
 }
 
 async function loadSample(id) {
-  const s = await (await fetch("/api/samples/" + id)).json();
+  const r = await fetch("/api/samples/" + encodeURIComponent(id));
+  if (!r.ok) return;
+  const s = await r.json();
   $("#input").value = s.text;
   $("#region").value = s.region_hint || "";
   clearFile();
   window.scrollTo({ top: 0, behavior: "smooth" });
 }
 
-// Challenge mode: load an adversarial example and run it immediately, so the
-// robustness (a look-alike caught, an injection treated as data) is one click away.
 async function loadSampleAndRun(id) {
   await loadSample(id);
   run();
@@ -93,10 +126,10 @@ $("#file").addEventListener("change", (e) => {
   if (!f) return;
   pickedFile = f;
   const t = $("#thumb");
-  t.innerHTML = "";
-  const img = el("img");
+  t.replaceChildren();
+  const img = el("img", { attrs: { alt: "Screenshot preview" } });
   img.src = URL.createObjectURL(f);
-  const rm = el("button", { class: "chip", text: "remove" });
+  const rm = el("button", { class: "chip", text: "Remove" });
   rm.onclick = clearFile;
   t.append(img, el("span", { text: f.name }), rm);
   t.style.display = "flex";
@@ -106,7 +139,7 @@ function clearFile() {
   pickedFile = null;
   $("#file").value = "";
   $("#thumb").style.display = "none";
-  $("#thumb").innerHTML = "";
+  $("#thumb").replaceChildren();
 }
 
 // ---------- run ----------
@@ -118,8 +151,10 @@ function looksLikeUrl(s) {
 
 async function run() {
   const text = $("#input").value.trim();
-  if (!text && !pickedFile) { flash("Paste a message or add a screenshot first."); return; }
-
+  if (!text && !pickedFile) {
+    flash("Paste a message or add a screenshot first.");
+    return;
+  }
   const fd = new FormData();
   if (pickedFile) fd.append("images", pickedFile);
   if (text && looksLikeUrl(text) && !pickedFile) fd.append("url", text);
@@ -130,15 +165,24 @@ async function run() {
   setBusy(true);
   renderSteps();
   $("#result").className = "result";
-  $("#result").innerHTML = "";
+  $("#result").replaceChildren();
   $("#errBanner").style.display = "none";
 
   try {
     const resp = await fetch("/api/analyze/stream", { method: "POST", body: fd });
-    if (!resp.ok || !resp.body) throw new Error("Server error " + resp.status);
+    if (!resp.ok || !resp.body) {
+      let msg = `The server returned ${resp.status}.`;
+      try {
+        const j = await resp.json();
+        msg = j.error || j.detail || msg;
+      } catch {
+        /* not JSON */
+      }
+      throw new Error(msg);
+    }
     await consume(resp.body);
   } catch (e) {
-    flash("Something went wrong: " + e.message);
+    flash(e.message);
   } finally {
     setBusy(false);
   }
@@ -159,177 +203,125 @@ async function consume(body) {
       const line = block.split("\n").find((l) => l.startsWith("data:"));
       if (!line) continue;
       let msg;
-      try { msg = JSON.parse(line.slice(5).trim()); } catch { continue; }
+      try {
+        msg = JSON.parse(line.slice(5).trim());
+      } catch {
+        continue;
+      }
       handle(msg);
     }
   }
 }
 
 function handle(msg) {
-  if (msg.type === "result") { renderResult(msg.result); return; }
-  if (msg.type === "step") {
-    if (msg.step === "error") { flash(msg.message); return; }
-    markStep(msg.step, msg.status, msg.message);
-  }
+  if (msg.type === "result") return renderResult(msg.result);
+  if (msg.type !== "step") return;
+  if (msg.step === "error") return flash(msg.message);
+  markStep(msg.step, msg.status, msg.message);
 }
 
-// ---------- steps UI ----------
+// ---------- steps ----------
 function renderSteps() {
   const box = $("#steps");
   box.className = "steps show";
-  box.innerHTML = "";
-  for (const [id, label] of STEPS) {
-    box.append(el("div", { class: "step", attrs: { "data-step": id } },
-      el("span", { class: "dot" }),
-      el("span", { class: "s-label", text: label }),
-    ));
-  }
+  box.replaceChildren(
+    ...STEPS.map(([id, label]) =>
+      el("div", { class: "step", attrs: { "data-step": id } }, el("span", { class: "dot" }), el("span", { class: "s-label", text: label })),
+    ),
+  );
 }
 
 function markStep(step, status, message) {
   const node = document.querySelector(`.step[data-step="${step}"]`);
   if (!node) return;
   node.classList.remove("active", "done", "err");
+  node.querySelector(".spin")?.remove();
   const label = node.querySelector(".s-label");
-  const old = node.querySelector(".spin"); if (old) old.remove();
   if (status === "started") {
     node.classList.add("active");
     node.append(el("span", { class: "spin" }));
-  } else if (status === "done") {
-    node.classList.add("done");
     if (message) label.textContent = message;
-    // mark everything above as done too, in case an event was coalesced
-  } else if (status === "skipped") {
-    node.classList.add("done");
-    if (message) label.textContent = message;
-  } else if (status === "error") {
-    node.classList.add("err");
+  } else {
+    node.classList.add(status === "error" ? "err" : "done");
     if (message) label.textContent = message;
   }
 }
 
-// ---------- result UI ----------
+// ---------- result ----------
 function renderResult(r) {
   const root = $("#result");
-  root.innerHTML = "";
+  root.replaceChildren();
   root.className = "result show";
 
   const v = r.verdict;
-  const rc = (RISK[v.risk_level] || RISK.info).color;
+  const risk = RISK[v.risk_level] || RISK.info;
 
-  // verdict banner + gauge
   const banner = el("div", { class: "verdict" });
-  banner.style.setProperty("--rc", rc);
-  banner.style.borderColor = rc;
-  banner.append(gauge(v.score, rc));
-  banner.append(el("div", { class: "vtext" },
-    el("div", { class: "level", text: (RISK[v.risk_level] || RISK.info).label }),
-    el("div", { class: "headline", text: v.headline }),
-  ));
+  banner.style.setProperty("--rc", risk.color);
+  banner.style.borderColor = risk.color;
+  banner.append(
+    gauge(v.score, risk.color),
+    el("div", { class: "vtext" }, el("div", { class: "level", text: risk.label }), el("div", { class: "headline", text: v.headline })),
+  );
   root.append(banner);
 
-  // evidence check — the trust centerpiece. Before we show a single reason, we
-  // show our working: how many findings the model put forward, how many the
-  // evidence could actually back, and any it couldn't. This is the thing that
-  // separates Telltale from "ask an LLM and hope."
   if (r.evidence_audit && r.evidence_audit.proposed > 0) {
     root.append(evidenceCheck(r.evidence_audit, r.rejected_claims || []));
   }
 
-  // tells
-  if (v.tells && v.tells.length) {
-    const sec = section("Why — the tells");
-    for (const t of v.tells) {
-      const card = el("div", { class: "tell" });
-      card.style.setProperty("--rc", rc);
-      card.append(el("div", { class: "t-title", text: t.title }));
-      card.append(el("div", { class: "t-exp", text: t.explanation }));
-      if (t.evidence_type === "quote" && t.quote)
-        card.append(el("div", { class: "quote", text: "“" + t.quote + "”" }));
-      const badgeText = t.evidence_type === "source" ? "verified online"
-        : t.evidence_type === "signal" ? "detected signal" : "from the message";
-      card.append(el("div", { class: "badge", text: badgeText }));
-      sec.append(card);
-    }
-    root.append(sec);
-  }
+  if (v.tells && v.tells.length) root.append(tellsSection(r, risk.color));
 
-  // reasoning
   if (v.reasoning) {
     const sec = section("The read");
     sec.append(el("div", { class: "how", text: v.reasoning }));
     root.append(sec);
   }
 
-  // how the con works
   if (r.archetype && r.archetype.archetype_id !== "none" && r.archetype_how) {
     const sec = section("How this con usually works");
-    const how = el("div", { class: "how" },
-      el("div", { class: "name", text: r.archetype.name }),
-      el("div", { text: r.archetype_how }),
-    );
+    const how = el("div", { class: "how" }, el("div", { class: "name", text: r.archetype.name }), el("div", { text: r.archetype_how }));
     if (r.archetype_refs && r.archetype_refs.length) {
-      const refs = el("div", { class: "refs", html: "Basis: " +
-        r.archetype_refs.map((x) => `<a href="${escapeAttr(x.url)}" target="_blank" rel="noopener">${escapeHtml(x.name)}</a>`).join(" · ") });
+      const refs = el("div", { class: "refs" }, "Basis ");
+      r.archetype_refs.forEach((x, i) => refs.append(i ? ", " : "", link(x.url, x.name)));
       how.append(refs);
     }
     sec.append(how);
     root.append(sec);
   }
 
-  // live sources
   if (r.sources && r.sources.length) {
     const sec = section("Live research");
     for (const s of r.sources) {
-      sec.append(el("div", { class: "source" },
-        el("div", { html: `<a href="${escapeAttr(s.url)}" target="_blank" rel="noopener">${escapeHtml(s.title)}</a>` }),
-        el("div", { class: "s-snip", text: s.snippet }),
-      ));
+      const about = s.mentions && s.mentions.length ? `Mentions ${s.mentions.join(", ")}` : "About the scam pattern in general";
+      sec.append(el("div", { class: "source" }, el("div", {}, link(s.url, s.title)), el("div", { class: "s-about", text: about }), el("div", { class: "s-snip", text: s.snippet })));
     }
     root.append(sec);
   }
 
-  // action plan
   const ap = r.action_plan || {};
   if ((ap.do_now && ap.do_now.length) || (ap.do_not && ap.do_not.length)) {
     const sec = section("What to do");
     const cols = el("div", { class: "cols" });
     if (ap.do_now && ap.do_now.length) {
-      const box = el("div", { class: "box do" }, el("h4", { text: "Do now" }));
       const ul = el("ul");
-      for (const s of ap.do_now)
-        ul.append(el("li", {}, el("span", { text: s.step + " " }),
-          el("span", { class: "why", text: s.why ? "— " + s.why : "" })));
-      box.append(ul); cols.append(box);
+      for (const s of ap.do_now) ul.append(el("li", {}, el("div", { text: s.step }), s.why ? el("div", { class: "why", text: s.why }) : null));
+      cols.append(el("div", { class: "box do" }, el("h4", { text: "Do now" }), ul));
     }
     if (ap.do_not && ap.do_not.length) {
-      const box = el("div", { class: "box dont" }, el("h4", { text: "Don’t" }));
       const ul = el("ul");
       for (const s of ap.do_not) ul.append(el("li", { text: s }));
-      box.append(ul); cols.append(box);
+      cols.append(el("div", { class: "box dont" }, el("h4", { text: "Don’t" }), ul));
     }
     sec.append(cols);
     root.append(sec);
   }
 
-  // what's not proven + what would change the verdict — the honest counterweight
-  // to the tells, so the verdict never reads as more certain than it is
   const notProven = r.not_proven || [];
   if (notProven.length || (ap.how_to_verify && ap.how_to_verify.length)) {
-    const sec = section("What's not proven — and what would change the verdict");
+    const sec = section("What isn’t proven, and what would settle it");
     const cols = el("div", { class: "cols" });
-    if (notProven.length) {
-      const box = el("div", { class: "box notproven" }, el("h4", { text: "Telltale can’t confirm" }));
-      const ul = el("ul");
-      for (const s of notProven) ul.append(el("li", { text: s }));
-      box.append(ul); cols.append(box);
-    }
-    if (ap.how_to_verify && ap.how_to_verify.length) {
-      const box = el("div", { class: "box wouldchange" }, el("h4", { text: "What would settle it" }));
-      const ul = el("ul");
-      for (const s of ap.how_to_verify) ul.append(el("li", { text: s }));
-      box.append(ul); cols.append(box);
-    }
+    if (notProven.length) cols.append(listBox("box notproven", "Telltale can’t confirm", notProven));
+    if (ap.how_to_verify && ap.how_to_verify.length) cols.append(listBox("box wouldchange", "What would settle it", ap.how_to_verify));
     sec.append(cols);
     root.append(sec);
   }
@@ -337,145 +329,179 @@ function renderResult(r) {
   if (ap.report_to && ap.report_to.length) {
     const sec = section("Where to report");
     for (const c of ap.report_to) {
-      const meta = [];
-      if (c.phone) meta.push(`☎ ${escapeHtml(c.phone)}`);
-      if (c.url) meta.push(`<a href="${escapeAttr(c.url)}" target="_blank" rel="noopener">${escapeHtml(c.url)}</a>`);
-      const card = el("div", { class: "report" },
-        el("div", { class: "r-name", text: `${c.name}${c.region && c.region !== "Global" ? " · " + c.region : ""}` }));
-      if (meta.length) card.append(el("div", { class: "r-meta", html: meta.join(" &nbsp; ") }));
+      const card = el("div", { class: "report" }, el("div", { class: "r-name", text: c.region && c.region !== "Global" ? `${c.name} (${c.region})` : c.name }));
+      const meta = el("div", { class: "r-meta" });
+      if (c.phone) meta.append(`Phone ${c.phone}`);
+      if (c.url) meta.append(c.phone ? "   " : "", link(c.url, c.url));
+      if (c.phone || c.url) card.append(meta);
       if (c.note) card.append(el("div", { class: "r-note", text: c.note }));
       sec.append(card);
     }
     root.append(sec);
   }
 
-  // safe reply
   if (ap.safe_reply) {
     const sec = section("A safe reply you could send");
-    const wrap = el("div", { class: "reply" });
-    const ta = el("textarea"); ta.value = ap.safe_reply; ta.readOnly = true;
+    const ta = el("textarea");
+    ta.value = ap.safe_reply;
+    ta.readOnly = true;
     const btn = el("button", { class: "btn copy", text: "Copy" });
-    btn.onclick = () => { navigator.clipboard.writeText(ap.safe_reply); btn.textContent = "Copied"; setTimeout(() => btn.textContent = "Copy", 1500); };
-    wrap.append(ta, btn);
-    sec.append(wrap);
+    btn.onclick = async () => {
+      try {
+        await navigator.clipboard.writeText(ap.safe_reply);
+        btn.textContent = "Copied";
+      } catch {
+        ta.select();
+        btn.textContent = "Select and copy";
+      }
+      setTimeout(() => (btn.textContent = "Copy"), 1500);
+    };
+    sec.append(el("div", { class: "reply" }, ta, btn));
     root.append(sec);
   }
 
-  // entities
   const en = r.entities || {};
-  const entChips = [];
-  const push = (label, arr) => { for (const x of (arr || [])) entChips.push([label, x]); };
-  push("link", en.domains); push("email", en.emails); push("phone", en.phones);
-  push("UPI", en.upi_ids); push("wallet", en.crypto_addresses); push("amount", en.amounts);
+  const picked = [["link", en.domains], ["email", en.emails], ["phone", en.phones], ["UPI", en.upi_ids], ["wallet", en.crypto_addresses], ["amount", en.amounts]];
+  const entChips = picked.flatMap(([label, arr]) => (arr || []).map((x) => el("span", { class: "entity" }, el("b", { text: label }), x)));
   if (entChips.length) {
     const sec = section("What we picked out");
-    const box = el("div", { class: "entities" });
-    for (const [lbl, val] of entChips)
-      box.append(el("span", { class: "entity", html: `<b>${lbl}</b>${escapeHtml(val)}` }));
-    sec.append(box);
+    sec.append(el("div", { class: "entities" }, ...entChips));
     root.append(sec);
   }
 
-  // coverage + disclaimer
   if (r.coverage_notes && r.coverage_notes.length) {
-    const n = el("div", { class: "notes" }, el("div", { text: "Notes on this analysis:" }));
-    const ul = el("ul");
-    for (const c of r.coverage_notes) ul.append(el("li", { text: c }));
-    n.append(ul);
-    root.append(n);
+    root.append(el("div", { class: "notes" }, el("div", { text: "Notes on this analysis" }), el("ul", {}, ...r.coverage_notes.map((c) => el("li", { text: c })))));
   }
+  const trace = runTrace(r);
+  if (trace) root.append(trace);
   root.append(el("div", { class: "disclaimer", text: r.disclaimer || "" }));
-
   root.scrollIntoView({ behavior: "smooth", block: "start" });
 }
 
-// The evidence-check panel: proposed vs. backed vs. rejected, and the rejected
-// claims spelled out with the reason each one failed. It renders in every mode —
-// in deterministic mode "proposed" equals "backed" because the detectors only
-// ever put forward what they can prove.
-function evidenceCheck(audit, rejected) {
-  const sec = section("Evidence check");
-  sec.classList.add("evcheck");
-
-  sec.append(el("div", { class: "ev-lead", text:
-    "Nothing reaches you on the model’s word alone. Every finding has to map to a "
-    + "detected signal, a live source, or a direct quote — here’s how this analysis held up." }));
-
-  const stats = el("div", { class: "ev-stats" });
-  stats.append(
-    evStat(audit.proposed, "proposed", "neutral"),
-    evStat(audit.kept, "backed by evidence", "ok"),
-    evStat(audit.rejected, "rejected", audit.rejected > 0 ? "bad" : "muted"),
-  );
-  sec.append(stats);
-
-  if (rejected.length) {
-    const box = el("div", { class: "ev-rejects" });
-    box.append(el("div", { class: "ev-rejects-h", text:
-      "The reasoning model proposed these — the evidence layer couldn’t back them, so they were dropped:" }));
-    for (const claim of rejected) {
-      const card = el("div", { class: "ev-claim" });
-      card.append(el("div", { class: "ev-claim-src", text: "Nemotron proposed" }));
-      card.append(el("div", { class: "ev-claim-top" },
-        el("span", { class: "ev-claim-title", text: claim.title || "Untitled claim" }),
-        el("span", { class: "ev-claim-badge", text: "✗ rejected" }),
-      ));
-      card.append(el("div", { class: "ev-claim-reason", text: "Reason: " + sentence(claim.reason) }));
-      box.append(card);
+function tellsSection(r, color) {
+  const sources = Object.fromEntries((r.sources || []).map((s) => [s.id, s]));
+  const signals = Object.fromEntries((r.signals || []).map((s) => [s.id, s]));
+  const sec = section("The tells");
+  for (const t of r.verdict.tells) {
+    const card = el("div", { class: "tell" }, el("div", { class: "t-title", text: t.title }), el("div", { class: "t-exp", text: t.explanation }));
+    card.style.setProperty("--rc", color);
+    if (t.evidence_type === "quote" && t.quote) {
+      card.append(el("div", { class: "quote", text: `“${t.quote}”` }), el("div", { class: "badge", text: "from the message" }));
+    } else if (t.evidence_type === "source") {
+      const src = sources[t.evidence_ref];
+      if (t.support) card.append(el("div", { class: "quote", text: `“${t.support}”` }));
+      if (src) card.append(el("div", { class: "t-src" }, "Source ", link(src.url, src.title)));
+      card.append(el("div", { class: "badge", text: "live source" }));
+    } else {
+      const sig = signals[t.evidence_ref];
+      if (sig) card.append(el("div", { class: "t-src", text: sig.evidence_text ? `Detector found ${sig.evidence_text}` : `Detector ${sig.label}` }));
+      card.append(el("div", { class: "badge", text: "detected signal" }));
     }
-    sec.append(box);
-  } else {
-    sec.append(el("div", { class: "ev-clean", text:
-      "Every finding the model proposed was backed by evidence — nothing had to be dropped." }));
+    sec.append(card);
   }
   return sec;
 }
 
-function evStat(n, label, kind) {
-  return el("div", { class: "ev-stat " + kind },
-    el("div", { class: "ev-num", text: String(n) }),
-    el("div", { class: "ev-lbl", text: label }),
+// Proposed vs backed vs rejected. In deterministic mode "proposed" equals "backed" because
+// the detectors only put forward what they found.
+function evidenceCheck(audit, rejected) {
+  const sec = section("Evidence check");
+  sec.classList.add("evcheck");
+  sec.append(
+    el("div", {
+      class: "ev-lead",
+      text: "Every finding has to point at something checkable, such as a detector signal, a passage from a live source, or the message’s own words. Here is how this analysis held up.",
+    }),
+    el("div", { class: "ev-stats" }, evStat(audit.proposed, "proposed", "neutral"), evStat(audit.kept, "backed by evidence", "ok"), evStat(audit.rejected, "rejected", audit.rejected > 0 ? "bad" : "muted")),
+  );
+  if (rejected.length) {
+    const box = el("div", { class: "ev-rejects" }, el("div", { class: "ev-rejects-h", text: "The model proposed these, but the evidence couldn’t back them, so they were dropped." }));
+    for (const claim of rejected) {
+      box.append(
+        el(
+          "div",
+          { class: "ev-claim" },
+          el("div", { class: "ev-claim-src", text: "Nemotron proposed" }),
+          el("div", { class: "ev-claim-top" }, el("span", { class: "ev-claim-title", text: claim.title || "Untitled claim" }), el("span", { class: "ev-claim-badge", text: "✗ rejected" })),
+          el("div", { class: "ev-claim-reason", text: `Dropped because it ${claim.reason}.` }),
+        ),
+      );
+    }
+    sec.append(box);
+  } else {
+    sec.append(el("div", { class: "ev-clean", text: "Every finding the model proposed was backed by evidence, so nothing had to be dropped." }));
+  }
+  return sec;
+}
+
+// Which model or tool ran each step, in what reasoning mode, and what it cost.
+function runTrace(r) {
+  const rows = r.run_trace || [];
+  if (!rows.length) return null;
+  const calls = rows.filter((x) => x.kind === "model");
+  const searches = rows.length - calls.length;
+  const tokens = calls.reduce((a, x) => a + x.tokens_in + x.tokens_out, 0);
+  const summary = `How this run worked. ${calls.length} model call${calls.length === 1 ? "" : "s"}, ${searches} live search${searches === 1 ? "" : "es"}, ${fmtMs(r.duration_ms || 0)} in total`;
+  const head = el("tr", {}, ...["Step", "Model or tool", "Mode", "Time", "Tokens in / out"].map((h) => el("th", { text: h })));
+  const body = rows.map((x) =>
+    el(
+      "tr",
+      { class: x.ok ? "" : "fail" },
+      el("td", { text: STAGE_NAMES[x.stage] || x.stage }),
+      el("td", { text: x.kind === "model" ? x.name.split("/").pop() : "Tavily", attrs: { title: x.kind === "model" ? x.name : x.detail } }),
+      el("td", { text: x.kind === "model" ? x.detail || "" : `${x.results} results${x.credits ? `, ${x.credits} credits` : ""}` }),
+      el("td", { class: "num", text: fmtMs(x.ms) }),
+      el("td", { class: "num", text: x.kind === "model" ? `${x.tokens_in} / ${x.tokens_out}` : "" }),
+    ),
+  );
+  return el(
+    "details",
+    { class: "trace" },
+    el("summary", { text: summary }),
+    el("div", { class: "trace-wrap" }, el("table", {}, el("thead", {}, head), el("tbody", {}, ...body))),
+    el("div", { class: "trace-note", text: `${tokens.toLocaleString()} tokens across all model calls. Reasoning runs only on the verdict step.` }),
   );
 }
 
-function sentence(s) {
-  s = String(s || "").trim();
-  if (!s) return "";
-  s = s[0].toUpperCase() + s.slice(1);
-  return /[.!?]$/.test(s) ? s : s + ".";
+function listBox(cls, heading, items) {
+  return el("div", { class: cls }, el("h4", { text: heading }), el("ul", {}, ...items.map((s) => el("li", { text: s }))));
+}
+
+function evStat(n, label, kind) {
+  return el("div", { class: "ev-stat " + kind }, el("div", { class: "ev-num", text: String(n) }), el("div", { class: "ev-lbl", text: label }));
 }
 
 function gauge(score, color) {
-  const r = 40, c = 2 * Math.PI * r, off = c * (1 - Math.max(0, Math.min(100, score)) / 100);
-  const svg = `
-    <svg viewBox="0 0 92 92" class="g">
-      <circle cx="46" cy="46" r="${r}" fill="none" stroke="#22304a" stroke-width="8"/>
-      <circle cx="46" cy="46" r="${r}" fill="none" stroke="${color}" stroke-width="8"
-        stroke-linecap="round" stroke-dasharray="${c}" stroke-dashoffset="${off}"
-        transform="rotate(-90 46 46)"/>
-    </svg>`;
-  const wrap = el("div", { class: "gauge", html: svg });
-  wrap.append(el("div", { class: "num", text: String(score) }));
-  return wrap;
+  const NS = "http://www.w3.org/2000/svg";
+  const r = 40;
+  const c = 2 * Math.PI * r;
+  const svg = document.createElementNS(NS, "svg");
+  svg.setAttribute("viewBox", "0 0 92 92");
+  svg.setAttribute("class", "g");
+  const ring = (stroke, extra = {}) => {
+    const n = document.createElementNS(NS, "circle");
+    for (const [k, v] of Object.entries({ cx: 46, cy: 46, r, fill: "none", stroke, "stroke-width": 8, ...extra })) n.setAttribute(k, v);
+    return n;
+  };
+  const off = c * (1 - Math.max(0, Math.min(100, score)) / 100);
+  svg.append(ring("#22304a"), ring(color, { "stroke-linecap": "round", "stroke-dasharray": c, "stroke-dashoffset": off, transform: "rotate(-90 46 46)" }));
+  return el("div", { class: "gauge" }, svg, el("div", { class: "num", text: String(score) }));
 }
 
 function section(title) {
   return el("div", { class: "section" }, el("h3", { text: title }));
 }
 
-// ---------- utils ----------
 function setBusy(b) {
   const btn = $("#go");
   btn.disabled = b;
   btn.textContent = b ? "Checking…" : "Check it";
 }
+
 function flash(m) {
   const b = $("#errBanner");
-  b.textContent = m; b.style.display = "block";
+  b.textContent = m;
+  b.style.display = "block";
 }
-function escapeHtml(s) {
-  return String(s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
-}
-function escapeAttr(s) { return escapeHtml(s); }
 
 boot();

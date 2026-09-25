@@ -3,6 +3,7 @@
 They assert the pieces wire together and that a strong scam never comes back as
 "safe", and a clean control message never gets over-flagged.
 """
+
 import pytest
 
 from backend.pipeline import analyze
@@ -25,7 +26,7 @@ async def test_strong_scams_are_not_marked_safe(sample_id):
     assert r is not None
     assert r.verdict.risk_level.value in ("medium", "high", "critical")
     assert r.verdict.score >= 35
-    assert r.action_plan.report_to           # always tell people where to report
+    assert r.action_plan.report_to  # always tell people where to report
 
 
 async def test_control_message_is_not_overflagged():
@@ -35,8 +36,8 @@ async def test_control_message_is_not_overflagged():
 
 async def test_result_shape_is_complete():
     r = await _run("delivery_sms")
-    assert r.entities.domains                 # extracted the link
-    assert r.disclaimer                       # always present
+    assert r.entities.domains  # extracted the link
+    assert r.disclaimer  # always present
     # every tell must reference real evidence (verify layer already ran)
     sig_ids = {s.id for s in r.signals}
     src_ids = {s.id for s in r.sources}

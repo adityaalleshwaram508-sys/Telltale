@@ -11,7 +11,7 @@ def test_upi_vs_email_are_not_confused():
     e = extract_entities("Send it to ravi@okhdfcbank or email me at ravi@gmail.com")
     assert "ravi@okhdfcbank" in e.upi_ids
     assert "ravi@gmail.com" in e.emails
-    assert "ravi@gmail.com" not in e.upi_ids       # email must not leak into UPI
+    assert "ravi@gmail.com" not in e.upi_ids  # email must not leak into UPI
     assert "ravi@okhdfcbank" not in e.emails
 
 
