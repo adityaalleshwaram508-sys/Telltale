@@ -49,19 +49,6 @@ Reasoning: **NVIDIA Nemotron** on **Nebius Token Factory** · Live verification:
 
 **Hard evidence** — deterministic detectors (look-alike domains, payment rails, urgency, prompt-injection) that set a risk floor. **Nemotron** — Nano + Super on Nebius Token Factory, doing the reasoning. **Live verification** — Tavily against current reports. The **claim verifier** admits a finding only if it maps to a real signal, a returned source, or a verbatim quote; anything else is rejected. The output is an **auditable verdict** — every claim traceable to its evidence, every rejection shown.
 
-## How it meets the hackathon brief
-
-| Requirement | How |
-| --- | --- |
-| Runtime call to **Nebius Token Factory** | every reasoning step calls the Token Factory inference API at runtime — [`backend/llm.py`](backend/llm.py) |
-| **NVIDIA open-source model** | NVIDIA Nemotron 3 (Nano + Super) does all reasoning |
-| Functional **Tavily** call | live verification runs a real Tavily search at runtime — [`backend/tavily.py`](backend/tavily.py) |
-| **Open source** | MIT — [`LICENSE`](LICENSE), public repo |
-| **Working demo** | https://telltale-jawt.onrender.com |
-| **Demo video** | _add your YouTube link_ |
-
----
-
 ## The 30-second demo
 
 Paste a suspicious message, link, or screenshot. Telltale returns a 0–100 risk
@@ -71,7 +58,7 @@ action plan, and regional reporting channels. Before any of that, it shows an
 backed, and any it rejected — with the reason each rejected claim was dropped.
 
 ```bash
-python -m pytest -q          # 40 unit tests
+python -m pytest -q          # 120 unit tests
 python eval/detection.py     # detection metrics (no API key needed)
 python eval/grounding.py     # Evidence Integrity Benchmark (no API key needed)
 ```
