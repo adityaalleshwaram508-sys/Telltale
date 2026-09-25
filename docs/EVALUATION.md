@@ -1,7 +1,7 @@
 # Evaluation
 
 Four measurements, from the most controlled to the most independent. All of them except the
-model-mode runs work without API keys, and the first three run in CI on every push.
+model-mode runs work without API keys, and the first two run in CI on every push.
 
 ## 1. Evidence Integrity Benchmark
 
