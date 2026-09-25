@@ -1,161 +1,305 @@
-  # Telltale
+# Telltale
 
 [![CI](https://github.com/adityaalleshwaram508-sys/Telltale/actions/workflows/ci.yml/badge.svg)](https://github.com/adityaalleshwaram508-sys/Telltale/actions/workflows/ci.yml)
-[![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
-[![Python 3.11](https://img.shields.io/badge/python-3.11-blue.svg)](https://www.python.org/)
+&nbsp;[![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
+&nbsp;[![Python 3.11](https://img.shields.io/badge/python-3.11-blue.svg)](https://www.python.org/)
 
-Telltale checks whether a message is a scam and shows the proof. Paste a text, email,
-WhatsApp message, call transcript or link, or share it straight from your phone, and you get
-a risk score, the specific tells behind it, what to do next and where to report it.
+**An evidence-constrained fraud-analysis pipeline.** A language model may propose a
+claim, but no claim reaches the user unless it can be grounded in the observed
+input, a deterministic signal, or retrieved evidence — and the model can never
+push the risk below what the hard evidence already justifies.
 
-NVIDIA Nemotron on Nebius Token Factory does the reasoning. Code outside the model decides
-what counts as evidence. A finding reaches you only if it points at something checkable (a
-detector signal, a passage from a live Tavily source, or the message's own words), and the
-score can never drop below what the detectors found.
+Reasoning: **NVIDIA Nemotron** on **Nebius Token Factory** · Live verification: **Tavily**
 
-**Live demo** https://telltale-jawt.onrender.com
-**Architecture** [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) &nbsp; **Evaluation** [docs/EVALUATION.md](docs/EVALUATION.md) &nbsp; **Threat model** [docs/THREAT_MODEL.md](docs/THREAT_MODEL.md)
+**Live demo:** https://telltale-jawt.onrender.com &nbsp;·&nbsp; **Demo video:** _add your YouTube link_ &nbsp;·&nbsp; **Architecture:** [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md)
 
-Built for the 2026 Nebius x NVIDIA Global AI Hackathon (Best Apps and Agents track). The
-first commit is from 18 September 2026, inside the submission period.
+*Built for the 2026 Nebius × NVIDIA Global AI Hackathon.*
 
-![Result](docs/shot-2-evidence.png)
+---
 
-## Why
-
-People in the US reported losing $12.5 billion to fraud in 2024, 25% more than the year
-before ([FTC](https://www.ftc.gov/news-events/news/press-releases/2025/03/new-ftc-data-show-big-jump-reported-losses-fraud-125-billion-2024)).
-In India the same scams arrive as fake KYC alerts, courier fees, UPI "refunds" and "digital
-arrest" calls. Asking a chatbot is the obvious fix and a risky one, because a confident wrong
-answer gets acted on. A model can invent a helpline number, call a real bank's site
-dangerous, or quote a rule that doesn't exist. Telltale lets the model reason but not decide.
-
-## How it works
+## How it works, in one picture
 
 ```text
- text / link / screenshot ─► MiniCPM-V (screenshots only) ─► message text
-                                                              │
-                 deterministic detectors ─► signals + risk floor
-                                                              │
-   Nemotron Nano   read the message        (reasoning off)    │
-   Nemotron Super  match a scam pattern    (reasoning off)    │
-   Tavily          exact-match searches for the message's own link, number, UPI id
-   Nemotron Super  verdict, every tell bound to evidence (reasoning low)
-                                                              │
-         verify.py  drop tells the evidence doesn't back, clamp the score to the floor
-                                                              │
-   Nemotron Super  action plan (reasoning off) + reporting channels from the knowledge base
+             PROOF
+               │
+               ▼
+        ┌──────────────┐
+        │   TELLTALE   │
+        └──────┬───────┘
+               │
+       ┌───────┴────────┐
+       │                │
+  HARD EVIDENCE     NEMOTRON
+       │                │
+       └───────┬────────┘
+               ▼
+        LIVE VERIFICATION
+               │
+               ▼
+        CLAIM VERIFIER
+               │
+       ┌───────┴────────┐
+       │                │
+    ACCEPT           REJECT
+       │                │
+       └───────┬────────┘
+               ▼
+        AUDITABLE VERDICT
 ```
 
-Each step has a deterministic fallback. If a model or search call fails, the answer gets
-narrower instead of breaking, the result says which step fell back, and it isn't cached.
+**Hard evidence** — deterministic detectors (look-alike domains, payment rails, urgency, prompt-injection) that set a risk floor. **Nemotron** — Nano + Super on Nebius Token Factory, doing the reasoning. **Live verification** — Tavily against current reports. The **claim verifier** admits a finding only if it maps to a real signal, a returned source, or a verbatim quote; anything else is rejected. The output is an **auditable verdict** — every claim traceable to its evidence, every rejection shown.
 
-## What the verifier checks
+## How it meets the hackathon brief
 
-| A tell that cites | survives only if |
+| Requirement | How |
 | --- | --- |
-| a detector **signal** | the detectors produced that id for this message, and the tell doesn't use it to claim outside confirmation ("has been reported", "RBI has warned") |
-| the message (**quote**) | the words appear in the message, at least two of them, and the message doesn't only use them in the negative ("do not share it with anyone") |
-| a live **source** | research returned that id, the tell carries a verbatim excerpt from it, and a claim about a specific link or number cites a source that mentions it |
+| Runtime call to **Nebius Token Factory** | every reasoning step calls the Token Factory inference API at runtime — [`backend/llm.py`](backend/llm.py) |
+| **NVIDIA open-source model** | NVIDIA Nemotron 3 (Nano + Super) does all reasoning |
+| Functional **Tavily** call | live verification runs a real Tavily search at runtime — [`backend/tavily.py`](backend/tavily.py) |
+| **Open source** | MIT — [`LICENSE`](LICENSE), public repo |
+| **Working demo** | https://telltale-jawt.onrender.com |
+| **Demo video** | _add your YouTube link_ |
 
-Rejected tells are shown to the user with the reason. What string checks can't establish is
-whether a tell's explanation follows from its evidence, so the UI puts the excerpt or the
-detector's finding next to every tell.
+---
 
-## Nemotron on Token Factory
+## The 30-second demo
 
-| Step | Model | Reasoning | Why |
-| --- | --- | --- | --- |
-| Read the message | `nvidia/NVIDIA-Nemotron-3-Nano-30B-A3B` | off | short structured extraction, the cheapest call |
-| Match the scam pattern | `nvidia/nemotron-3-super-120b-a12b` | off | pick one id from a closed list |
-| Verdict | `nvidia/nemotron-3-super-120b-a12b` | low effort | the only step that weighs evidence |
-| Action plan | `nvidia/nemotron-3-super-120b-a12b` | off | writing, not judging |
-| Second opinion (optional) | Nemotron 3 Ultra, set `TELLTALE_ESCALATION_MODEL` | on | medium-risk verdicts, or when two or more claims were rejected |
-| Screenshot | `openbmb/MiniCPM-V-4_5` | n/a | Token Factory has no Nemotron vision model |
+Paste a suspicious message, link, or screenshot. Telltale returns a 0–100 risk
+score, the specific tells behind it, the scam archetype with a cited source, an
+action plan, and regional reporting channels. Before any of that, it shows an
+**Evidence check**: how many findings the model proposed, how many the evidence
+backed, and any it rejected — with the reason each rejected claim was dropped.
 
-Nemotron 3 reasons before answering unless told otherwise, so each step sets its mode through
-`chat_template_kwargs`. Every call has a token cap, only transient errors are retried, and a
-reply cut off at the cap is never parsed. Every result includes a "How this run worked"
-panel with the model, reasoning mode, latency and tokens of each call. `python eval/latency.py
---compare-reasoning` measures the per-step settings against reasoning everywhere.
+```bash
+python -m pytest -q          # 40 unit tests
+python eval/detection.py     # detection metrics (no API key needed)
+python eval/grounding.py     # Evidence Integrity Benchmark (no API key needed)
+```
 
-## Live research with Tavily
+## What it looks like
 
-- **Entity searches** use `exact_match`, so a result only comes back if it names the message's
-  own link, phone number or UPI id.
-- The suspect domain goes in `exclude_domains`, so the scam site is never cited as evidence
-  about itself.
-- When there's nothing specific to look up, one pattern search on the claimed sender runs
-  instead, and the verifier lets those results back general claims only.
-- Searches run concurrently, boost the user's country, and report credits used.
+_These screenshots are one example run. Telltale calls Nemotron and Tavily live, so the exact score and the number of tells shift a little between runs. What never changes is that it flags this as a high-risk scam, never returns safe, and shows every finding backed by evidence._
+
+**1. Input** — paste a suspicious message, link, or screenshot, or try a built-in example (including the adversarial "Challenge Telltale" set).
+
+![Input](docs/shot-1-input.png)
+
+**2. Evidence** — every tell is bound to a detected signal, a live Tavily source, or a direct quote.
+
+![Evidence](docs/shot-2-evidence.png)
+
+**3. Verification** — the Evidence check on every result: how many findings the model proposed, how many the evidence backed, and any it couldn't (rejected, with the reason). In this example every finding was backed, and the exact count varies between runs because the analysis is live; the verifier's rejection behaviour is measured reproducibly in the [Evidence Integrity Benchmark](docs/EVALUATION.md).
+
+![Verification](docs/shot-3-verification.png)
+
+## Why this is different
+
+Reported consumer fraud losses hit **$12.5 billion in the US alone in 2024**, up
+25% in a single year ([FTC](https://www.ftc.gov/news-events/news/press-releases/2025/03/new-ftc-data-show-big-jump-reported-losses-fraud-125-billion-2024)).
+The instinctive fix — ask an LLM "is this a scam?" — is risky, because a confident
+**wrong** answer is worse than none: a model can invent a government helpline, call
+a real domain malicious without checking, or quote a rule it never verified.
+
+Scam detection is the application; **evidence-constrained inference** is the
+contribution. Telltale treats the model as a *proposer*, not an authority.
+Detection, reasoning, evidence, and verification are separate stages, and a
+verification layer sits between the model and the user.
+
+## Evidence-constrained inference
+
+The system holds one invariant:
+
+> Every *tell* in the final verdict must reference exactly one piece of evidence —
+> a deterministic **signal**, a returned **source**, or a verbatim **quote** from
+> the input — and that reference must check out.
+
+[`backend/verify.py`](backend/verify.py) enforces it:
+
+* a tell citing a signal must cite a signal id the detectors actually produced;
+* a tell citing a source must cite a source id research actually returned;
+* a tell quoting the message must quote text that actually appears in it.
+
+Anything else is dropped and recorded as a rejected claim. Separately,
+`reconcile_verdict` clamps the model's score into `[floor, 100]`, where `floor` is
+set by the deterministic detectors — so a message full of severe signals can never
+be returned "safe," regardless of what the model says. Rejected claims are
+surfaced in the UI so the verifier's decision can be inspected during a run.
+
+## Live example
+
+Input (an SMS):
+
+```
+INDIA POST: Your parcel is on hold due to incomplete address. Pay the ₹25
+redelivery fee within 24 hours or it will be returned: https://indiapost-redelivery.top/track
+```
+
+Pipeline:
+
+1. **Deterministic detectors** flag a look-alike/brand-mismatched domain, a
+   suspicious TLD, and urgency language, and set a risk floor.
+2. **Nemotron Nano** extracts entities and message context; **Nemotron Super**
+   classifies the archetype (delivery/courier phish).
+3. **Tavily** checks the domain and claims against live reports.
+4. **Nemotron Super** synthesises a verdict; **`verify.py`** drops any tell it
+   can't ground and clamps the score to the floor.
+
+Result: flagged as a high-risk scam in the `HIGH` to `CRITICAL` band, every tell bound to a signal, a source, or a quote, and
+an Evidence check panel showing what the model proposed versus what survived.
+
+## Architecture
+
+```text
+        ┌── screenshot ─► MiniCPM-V (transcribe) ─┐
+input ──┤── link ──────────────────────────────────►│
+        └── text ──────────────────────────────────►│  message text
+                                                     ▼
+                          deterministic detectors (code)  ─► signals + risk FLOOR
+                                                     │
+              Nemotron Nano ── context ─────────────┤
+              Nemotron Super ── classify ───────────┤  (archetype ∈ curated catalogue)
+                                                     │
+                          Tavily ── live research ──► sources
+                                                     │
+              Nemotron Super ── verdict (tells bound to signal/source/quote)
+                                                     │
+                      verify.py ── drop unsupported tells · clamp score to floor
+                                                     │
+              Nemotron Super ── action plan + report channels (curated KB)
+                                                     ▼
+                                             AnalysisResult
+```
+
+Each stage is separable and testable, and every model stage degrades to a
+deterministic path (with a coverage note) rather than failing, so the app **fails
+closed** — it never invents to fill a gap. Full write-up:
+[`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md).
+
+## Why Nemotron + Nebius
+
+Every reasoning step is a runtime call to **Nebius Token Factory's**
+OpenAI-compatible endpoint, using **NVIDIA Nemotron 3**:
+
+| Stage                 | Model                                   | Why                              |
+| --------------------- | --------------------------------------- | -------------------------------- |
+| Screenshot OCR        | `openbmb/MiniCPM-V-4_5`                 | vision transcription             |
+| Message understanding | `nvidia/NVIDIA-Nemotron-3-Nano-30B-A3B` | fast, cheap structured extraction|
+| Classification / verdict / actions | `nvidia/nemotron-3-super-120b-a12b` | reasoning + long context |
+
+The Nano/Super split keeps the frequent extraction calls fast and cheap while
+reserving the larger model for the reasoning-heavy steps. Token Factory has no
+Nemotron vision model, so screenshot transcription uses MiniCPM-V; **nothing that
+decides the verdict runs on a non-Nemotron model.** Model IDs are configurable in
+[`backend/config.py`](backend/config.py); these defaults are what the app calls at
+runtime.
+
+## Live verification with Tavily
+
+When a message contains something checkable, Telltale runs a live Tavily search
+and treats the results as cited evidence — never as automatic proof:
+
+```text
+suspicious entity (domain / phone / UPI id / named platform)
+        └─► year-aware query construction
+              └─► Tavily search
+                    └─► source normalisation (id, title, url, snippet)
+                          └─► evidence matching  → Source objects (src1, src2, …)
+                                └─► claim verification: a source-tell must cite a returned id
+                                      └─► verdict
+```
+
+A verdict can only cite a source id that Tavily actually returned; a fabricated
+citation is dropped by the verifier. See [`backend/tavily.py`](backend/tavily.py).
+Tavily is optional in local dev — without a key the research step is skipped and
+the verdict says so instead of pretending it checked.
 
 ## Evaluation
 
-All of this runs without API keys and in CI. Details in [docs/EVALUATION.md](docs/EVALUATION.md).
+Two things are measured, both reproducible with no API key.
 
-| Check | Result |
-| --- | --- |
-| Unit and integration tests | 120 passing |
-| Evidence Integrity Benchmark, 52 messages | 501 of 501 adversarial cases rejected, 251 of 251 grounded controls kept |
-| Labelled examples (16 scam, 8 legitimate), detectors only | precision 100%, recall 75%, F1 85.7% |
-| Hard negatives (24 legitimate messages that use scam words) | 0 flagged, highest score 16 of 100 |
-| [SMS Phishing Dataset](https://data.mendeley.com/datasets/f45bkkt8pr/1), 4,844 real legitimate SMS | 0 flagged by the detectors (95% CI 0 to 0.08%) |
-| Same dataset, 638 real smishing SMS, detectors only | 4 flagged (0.6%) |
+**Detection** (deterministic mode, 24-example hand-authored set):
 
-The last row is the honest shape of the design. The detectors are a floor built for
-precision, because the model can't argue that floor down, and they were written for Indian
-scam formats while that dataset is mostly older UK and Nigerian SMS. Recall on real-world
-messages comes from Nemotron, which `eval/external.py --with-model` measures on a sample.
+| Metric | Value |
+|--------|-------|
+| Precision | 100% |
+| False-positive rate | 0% |
+| Recall | 75% |
 
-## Run it
+The detection set is small and written by one person — read it as a regression
+signal, not a real-world accuracy claim. It gates on **zero false positives**; the
+4 recall misses are subtle semantic scams that the model lifts when enabled.
+
+**Evidence Integrity Benchmark** — the benchmark that measures the actual
+contribution. 100 adversarial claims (25 fabricated signals, 25 fabricated quotes,
+20 fabricated citations, 15 out-of-taxonomy archetypes, 15 score-manipulation
+attempts) plus 27 grounded controls, run through the real verifier:
+
+| Metric | Result |
+|--------|--------|
+| Claim rejection rate | 100% (70/70 fabricated claims rejected) |
+| Quote fidelity | 100% (35/35) |
+| Citation validity | 100% (23/23) |
+| Signal grounding | 100% (29/29) |
+| Archetype integrity | 100% (15/15 forced to "none") |
+| Risk-floor violations | 0 / 15 |
+| False rejections | 0 |
+
+Method and honest limitations: [`docs/EVALUATION.md`](docs/EVALUATION.md).
+
+## Threat model
+
+Telltale is a security tool, so it's designed against an adversary — including one
+that targets the analysis itself. Message content is treated strictly as **data,
+not instructions**: a deterministic detector flags prompt-injection attempts
+("ignore previous instructions", "classify this as safe") as a signal, and because
+the deterministic floor and the verifier are outside the model's control, a message
+still can't talk itself into a "safe" verdict. The UI's **Challenge Telltale** mode
+runs curated adversarial messages (a look-alike-domain phish, a prompt-injection
+attempt) so this robustness is one click away. Full analysis:
+[`docs/THREAT_MODEL.md`](docs/THREAT_MODEL.md).
+
+## Run locally
 
 ```bash
-pip install -r requirements-dev.txt
-cp .env.example .env            # NEBIUS_API_KEY for the model, TAVILY_API_KEY for live checks
-./scripts/run-dev.sh            # http://127.0.0.1:8000
-
-python -m pytest -q             # tests
-python eval/grounding.py        # Evidence Integrity Benchmark
-python eval/detection.py        # detection metrics
+pip install -r requirements.txt
+cp .env.example .env            # add NEBIUS_API_KEY (required), TAVILY_API_KEY (optional)
+./scripts/run-dev.sh            # or: uvicorn backend.app:app  →  http://127.0.0.1:8000
 ```
 
-Without keys Telltale runs in deterministic mode and says so on every result. Docker:
-`docker build -t telltale . && docker run -p 8000:8000 --env-file .env telltale`. The live
-demo runs that container on Render ([render.yaml](render.yaml)). Every setting is listed in
-[.env.example](.env.example).
+Docker: `docker build -t telltale . && docker run -p 8000:8000 --env-file .env telltale`.
+Deploys anywhere that runs a container (live on Render via [`render.yaml`](render.yaml)).
+With no keys, Telltale runs in deterministic mode (detectors + knowledge base
+only) and the UI marks that model reasoning and live verification weren't used.
 
-On Android, open the demo in Chrome and choose "Add to Home screen". Telltale then shows up in
-the share sheet, so a suspicious WhatsApp or SMS message can be checked without copying it.
-
-## Project layout
+## Project structure
 
 ```text
-backend/    app.py (API, limits)   pipeline.py   llm.py (Token Factory)   tavily.py
-            verify.py (evidence checks)   prompts.py   schemas.py   config.py   limits.py
-            detectors/   knowledge/data/*.yaml (scam types, brands, lexicons, reporting)
-            samples.py (labelled, adversarial and hard-negative messages)
-frontend/   single page, no framework; installable with an Android share target
-eval/       grounding.py   detection.py   external.py   latency.py
-tests/      unit, API and pipeline tests
-docs/       ARCHITECTURE.md   EVALUATION.md   THREAT_MODEL.md
+backend/    app.py · pipeline.py · llm.py · tavily.py · verify.py · prompts.py · schemas.py
+            config.py · samples.py (examples + adversarial set) · knowledge/ (curated YAML)
+            detectors/ — deterministic detectors, incl. injection.py (prompt-injection)
+frontend/   single-page analysis interface (vanilla JS)
+eval/       detection.py (detection metrics) · grounding.py (Evidence Integrity Benchmark)
+tests/      unit + verification tests
+docs/       ARCHITECTURE.md · EVALUATION.md · THREAT_MODEL.md
+scripts/    run-dev.sh (reload) · run.sh (prod)
 ```
 
 ## Limitations
 
-- Deterministic recall on real-world SMS is low by design; without a model key Telltale only
-  catches messages with concrete tells.
-- Reporting channels cover India, the US, UK, Australia, Canada and Singapore; elsewhere it
-  falls back to general advice.
-- The brand list and lexicons are partial and mostly English and Hinglish.
-- Live search results change and are treated as supporting evidence, never as proof.
-- Telltale is a safety aid, not legal or financial advice.
+* Reporting coverage is strongest for India, the US, UK, Australia, Canada and
+  Singapore; elsewhere it falls back to general safety guidance.
+* The brand / look-alike list and the detection set are intentionally partial.
+* Live web results change and are treated as supporting evidence, not proof.
+* Telltale is a safety aid, not legal or financial advice — when money or personal
+  data is involved, verify through an official channel you find yourself.
 
 ## Roadmap
 
-- Model-mode results on the external dataset and a larger, independently labelled Indian set
-- WhatsApp and SMS forwarding bot, and voice-call transcription
-- More countries' brands and reporting channels
+* A larger, independently-sourced, anonymised evaluation set.
+* A browser extension and a WhatsApp/SMS share-target.
+* Broader country-specific reporting and brand data.
+* Voice-call transcription for phone scams.
 
 ## License
 
-MIT, see [LICENSE](LICENSE).
+MIT — see [`LICENSE`](LICENSE).
