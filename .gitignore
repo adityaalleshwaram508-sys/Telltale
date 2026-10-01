@@ -12,3 +12,4 @@ node_modules/
 
 # External datasets are downloaded, not committed
 eval/data/
+telltale.bundle
