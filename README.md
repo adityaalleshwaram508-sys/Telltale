@@ -243,7 +243,7 @@ the deterministic floor and the verifier are outside the model's control, a mess
 still can't talk itself into a "safe" verdict. The UI's **Challenge Telltale** mode
 runs curated adversarial messages (a look-alike-domain phish, a prompt-injection
 attempt) so this robustness is one click away. Full analysis:
-[`docs/THREAT_MODEL.md`](docs/THREAT_MODEL.md).
+[`docs/THREAT_MODEL.md`](docs/THREAT_MODEL.md) &nbsp; **Tool feedback** [docs/FEEDBACK.md](docs/FEEDBACK.md).
 
 ## Run locally
 
