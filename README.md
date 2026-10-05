@@ -11,7 +11,7 @@ push the risk below what the hard evidence already justifies.
 
 Reasoning: **NVIDIA Nemotron** on **Nebius Token Factory** · Live verification: **Tavily**
 
-**Live demo:** https://telltale-jawt.onrender.com &nbsp;·&nbsp; **Demo video:** _add your YouTube link_ &nbsp;·&nbsp; **Architecture:** [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) &nbsp;·&nbsp; **Tool feedback:** [`docs/FEEDBACK.md`](docs/FEEDBACK.md)
+**Live demo:** https://telltale-jawt.onrender.com &nbsp;·&nbsp; **Demo video:** https://youtu.be/XJmQCpAodRk &nbsp;·&nbsp; **Architecture:** [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) &nbsp;·&nbsp; **Tool feedback:** [`docs/FEEDBACK.md`](docs/FEEDBACK.md)
 
 *Built for the 2026 Nebius × NVIDIA Global AI Hackathon.*
 
