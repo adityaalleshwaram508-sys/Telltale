@@ -202,9 +202,28 @@ the verdict says so instead of pretending it checked.
 
 ## Evaluation
 
-Two things are measured, both reproducible with no API key.
+Four measurements. Everything except the model-mode runs works without API keys, and
+the first two gate CI on every push. Full method and honest limitations:
+[`docs/EVALUATION.md`](docs/EVALUATION.md).
 
-**Detection** (deterministic mode, 24-example hand-authored set):
+**Evidence Integrity Benchmark**, the one that measures what this project actually
+claims. 752 generated cases across all 52 messages in `backend/samples.py`, run
+through the real verifier.
+
+| Metric | Result |
+|--------|--------|
+| Adversarial claims rejected | 501 of 501 |
+| Grounded controls kept | 251 of 251 |
+| Score pushed below the detector floor | 0 |
+| False rejections | 0 |
+
+Adversarial cases cover fabricated signal ids, quotes lifted from another message,
+source ids that were never returned, excerpts that are not in the cited source,
+one-word quotes, quotes used only inside a negation, a detector signal used to assert
+outside confirmation, off-topic sources for a named link or number, out-of-taxonomy
+archetypes, and attempts to score below the floor.
+
+**Detection**, deterministic mode, 24 hand-authored examples.
 
 | Metric | Value |
 |--------|-------|
@@ -212,26 +231,18 @@ Two things are measured, both reproducible with no API key.
 | False-positive rate | 0% |
 | Recall | 75% |
 
-The detection set is small and written by one person — read it as a regression
-signal, not a real-world accuracy claim. It gates on **zero false positives**; the
-4 recall misses are subtle semantic scams that the model lifts when enabled.
+Small and written by one person, so read it as a regression signal rather than a
+real-world accuracy claim. It gates on zero false positives. The 4 recall misses are
+subtle semantic scams the model lifts when enabled.
 
-**Evidence Integrity Benchmark** — the benchmark that measures the actual
-contribution. 100 adversarial claims (25 fabricated signals, 25 fabricated quotes,
-20 fabricated citations, 15 out-of-taxonomy archetypes, 15 score-manipulation
-attempts) plus 27 grounded controls, run through the real verifier:
+**Hard negatives**, 24 legitimate messages that use scam vocabulary (bank advisories,
+OTPs, promo codes, genuine bank links): 0 flagged, highest score 16 of 100.
 
-| Metric | Result |
-|--------|--------|
-| Claim rejection rate | 100% (70/70 fabricated claims rejected) |
-| Quote fidelity | 100% (35/35) |
-| Citation validity | 100% (23/23) |
-| Signal grounding | 100% (29/29) |
-| Archetype integrity | 100% (15/15 forced to "none") |
-| Risk-floor violations | 0 / 15 |
-| False rejections | 0 |
-
-Method and honest limitations: [`docs/EVALUATION.md`](docs/EVALUATION.md).
+**Independent dataset**, the SMS Phishing Dataset of Mishra and Soni (2022, Mendeley
+Data, DOI 10.17632/f45bkkt8pr.1), 5,971 real SMS labelled by other researchers. The
+detectors flagged 0 of the 4,844 legitimate messages, a 95% Wilson interval of 0 to
+0.08%. Nobody on this side chose those messages. Run it with
+`python eval/external.py path/to/Dataset_5971.csv`.
 
 ## Threat model
 
@@ -283,7 +294,7 @@ scripts/    run-dev.sh (reload) · run.sh (prod)
 ## Roadmap
 
 * A larger, independently-sourced, anonymised evaluation set.
-* A browser extension and a WhatsApp/SMS share-target.
+* A browser extension, and the same share flow on iOS, which does not support share targets the way Android does.
 * Broader country-specific reporting and brand data.
 * Voice-call transcription for phone scams.
 
