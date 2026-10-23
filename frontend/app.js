@@ -265,6 +265,24 @@ function renderResult(r) {
   );
   root.append(banner);
 
+  const ap = r.action_plan || {};
+  if ((ap.do_now && ap.do_now.length) || (ap.do_not && ap.do_not.length)) {
+    const sec = section("What to do");
+    const cols = el("div", { class: "cols" });
+    if (ap.do_now && ap.do_now.length) {
+      const ul = el("ul");
+      for (const s of ap.do_now) ul.append(el("li", {}, el("div", { text: s.step }), s.why ? el("div", { class: "why", text: s.why }) : null));
+      cols.append(el("div", { class: "box do" }, el("h4", { text: "Do now" }), ul));
+    }
+    if (ap.do_not && ap.do_not.length) {
+      const ul = el("ul");
+      for (const s of ap.do_not) ul.append(el("li", { text: s }));
+      cols.append(el("div", { class: "box dont" }, el("h4", { text: "Don’t" }), ul));
+    }
+    sec.append(cols);
+    root.append(sec);
+  }
+
   if (r.evidence_audit && r.evidence_audit.proposed > 0) {
     root.append(evidenceCheck(r.evidence_audit, r.rejected_claims || []));
   }
@@ -290,29 +308,11 @@ function renderResult(r) {
   }
 
   if (r.sources && r.sources.length) {
-    const sec = section("Live research");
+    const sec = section("Live research, via Tavily");
     for (const s of r.sources) {
       const about = s.mentions && s.mentions.length ? `Mentions ${s.mentions.join(", ")}` : "About the scam pattern in general";
       sec.append(el("div", { class: "source" }, el("div", {}, link(s.url, s.title)), el("div", { class: "s-about", text: about }), el("div", { class: "s-snip", text: s.snippet })));
     }
-    root.append(sec);
-  }
-
-  const ap = r.action_plan || {};
-  if ((ap.do_now && ap.do_now.length) || (ap.do_not && ap.do_not.length)) {
-    const sec = section("What to do");
-    const cols = el("div", { class: "cols" });
-    if (ap.do_now && ap.do_now.length) {
-      const ul = el("ul");
-      for (const s of ap.do_now) ul.append(el("li", {}, el("div", { text: s.step }), s.why ? el("div", { class: "why", text: s.why }) : null));
-      cols.append(el("div", { class: "box do" }, el("h4", { text: "Do now" }), ul));
-    }
-    if (ap.do_not && ap.do_not.length) {
-      const ul = el("ul");
-      for (const s of ap.do_not) ul.append(el("li", { text: s }));
-      cols.append(el("div", { class: "box dont" }, el("h4", { text: "Don’t" }), ul));
-    }
-    sec.append(cols);
     root.append(sec);
   }
 
