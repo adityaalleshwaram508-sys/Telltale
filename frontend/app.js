@@ -20,13 +20,23 @@ const STAGE_NAMES = {
   action: "Next steps",
 };
 
+// Colours live in styles.css as --critical, --high and so on. Here each level only names its class.
 const RISK = {
-  critical: { color: "#ff5a5f", label: "Critical, almost certainly a scam" },
-  high: { color: "#ff8c42", label: "High, likely a scam" },
-  medium: { color: "#ffcf4d", label: "Suspicious, verify before acting" },
-  low: { color: "#52c07a", label: "Low, probably legitimate" },
-  info: { color: "#7f8da3", label: "No strong scam signals found" },
+  critical: { cls: "risk-critical", label: "Critical, almost certainly a scam" },
+  high: { cls: "risk-high", label: "High, likely a scam" },
+  medium: { cls: "risk-medium", label: "Suspicious, verify before acting" },
+  low: { cls: "risk-low", label: "Low, probably legitimate" },
+  info: { cls: "risk-info", label: "No strong scam signals found" },
 };
+
+// The same cut-offs as risk_band() in backend/verify.py, used to draw the score scale.
+const BANDS = [
+  ["info", 0],
+  ["low", 15],
+  ["medium", 35],
+  ["high", 60],
+  ["critical", 80],
+];
 
 const $ = (sel) => document.querySelector(sel);
 let pickedFile = null;
@@ -53,6 +63,43 @@ function link(url, text) {
   }
   if (!href) return el("span", { text: text || String(url) });
   return el("a", { text: text || href, attrs: { href, target: "_blank", rel: "noopener noreferrer" } });
+}
+
+// A scam checker shouldn't ask anyone to click blind, so every outside link shows its domain.
+function hostOf(url) {
+  try {
+    const u = new URL(url, location.href);
+    if (u.protocol === "https:" || u.protocol === "http:") return u.hostname.replace(/^www\./, "");
+  } catch {
+    /* not a URL */
+  }
+  return "";
+}
+
+function srcLink(url, text) {
+  const host = hostOf(url);
+  return el("span", { class: "src" }, link(url, text), host ? el("span", { class: "host", text: host }) : null);
+}
+
+// Tap to call on a phone. Only digits, spaces, dashes and a leading plus make it into the href.
+function telLink(phone) {
+  const digits = String(phone).replace(/[\s-]/g, "");
+  if (!/^\+?\d{3,15}$/.test(digits)) return el("span", { text: String(phone) });
+  return el("a", { text: String(phone), attrs: { href: "tel:" + digits } });
+}
+
+// A collapsed section. The summary stays visible, so a reader can see what's inside without opening it.
+function fold(title, count, ...body) {
+  return el(
+    "details",
+    { class: "fold" },
+    el("summary", {}, el("span", { text: title }), count ? el("span", { class: "count", text: count }) : null),
+    el("div", { class: "fold-body" }, ...body),
+  );
+}
+
+function plural(n, one, many = one + "s") {
+  return `${n} ${n === 1 ? one : many}`;
 }
 
 function fmtMs(ms) {
@@ -120,6 +167,27 @@ async function loadSampleAndRun(id) {
   run();
 }
 
+// ---------- install ----------
+// Where the browser offers it (Chrome on Android and desktop), show an Install button. Installed on
+// Android, Telltale appears in the share sheet and receives the message through ?text= (see boot).
+let installPrompt = null;
+window.addEventListener("beforeinstallprompt", (e) => {
+  e.preventDefault();
+  installPrompt = e;
+  $("#installBtn").hidden = false;
+});
+window.addEventListener("appinstalled", () => {
+  installPrompt = null;
+  $("#installBtn").hidden = true;
+});
+$("#installBtn").addEventListener("click", async () => {
+  if (!installPrompt) return;
+  installPrompt.prompt();
+  await installPrompt.userChoice.catch(() => {});
+  installPrompt = null;
+  $("#installBtn").hidden = true;
+});
+
 // ---------- file ----------
 $("#file").addEventListener("change", (e) => {
   const f = e.target.files[0];
@@ -132,13 +200,13 @@ $("#file").addEventListener("change", (e) => {
   const rm = el("button", { class: "chip", text: "Remove" });
   rm.onclick = clearFile;
   t.append(img, el("span", { text: f.name }), rm);
-  t.style.display = "flex";
+  t.hidden = false;
 });
 
 function clearFile() {
   pickedFile = null;
   $("#file").value = "";
-  $("#thumb").style.display = "none";
+  $("#thumb").hidden = true;
   $("#thumb").replaceChildren();
 }
 
@@ -248,6 +316,8 @@ function markStep(step, status, message) {
 }
 
 // ---------- result ----------
+// Order follows what a worried person needs: the verdict, what to do about it, a short why, and
+// then the working, folded away for anyone who wants to check it.
 function renderResult(r) {
   const root = $("#result");
   root.replaceChildren();
@@ -255,19 +325,16 @@ function renderResult(r) {
 
   const v = r.verdict;
   const risk = RISK[v.risk_level] || RISK.info;
-
-  const banner = el("div", { class: "verdict" });
-  banner.style.setProperty("--rc", risk.color);
-  banner.style.borderColor = risk.color;
-  banner.append(
-    gauge(v.score, risk.color),
-    el("div", { class: "vtext" }, el("div", { class: "level", text: risk.label }), el("div", { class: "headline", text: v.headline })),
-  );
-  root.append(banner);
-
   const ap = r.action_plan || {};
+  // Reporting channels sit beside the actions when a message looks like a scam. On a low-risk
+  // result they would only alarm someone, so they move down with the rest of the detail.
+  const serious = ["medium", "high", "critical"].includes(v.risk_level);
+
+  root.append(verdictBlock(v, risk));
+
   if ((ap.do_now && ap.do_now.length) || (ap.do_not && ap.do_not.length)) {
     const sec = section("What to do");
+    sec.classList.add("todo");
     const cols = el("div", { class: "cols" });
     if (ap.do_now && ap.do_now.length) {
       const ul = el("ul");
@@ -283,122 +350,167 @@ function renderResult(r) {
     root.append(sec);
   }
 
+  // reporting.yaml lists each region's most direct channels first (the national helpline or portal,
+  // then the next one, or your bank where there's only one), so two stay in view and the rest fold.
+  const channels = ap.report_to || [];
+  if (channels.length && serious) {
+    const sec = section("Where to report it");
+    sec.append(reportList(channels.slice(0, 2)));
+    if (channels.length > 2) sec.append(fold(plural(channels.length - 2, "more place") + " to report", "", reportList(channels.slice(2))));
+    root.append(sec);
+  }
+
+  if (ap.safe_reply) root.append(safeReply(ap.safe_reply));
+
   if (r.evidence_audit && r.evidence_audit.proposed > 0) {
     root.append(evidenceCheck(r.evidence_audit, r.rejected_claims || []));
   }
-
-  if (v.tells && v.tells.length) root.append(tellsSection(r, risk.color));
-
-  if (v.reasoning) {
-    const sec = section("The read");
-    sec.append(el("div", { class: "how", text: v.reasoning }));
+  if (v.tells && v.tells.length) {
+    root.append(tellsSection(r, risk.cls));
+  } else if (!serious) {
+    const sec = section("Why it’s rated low");
+    const said = (r.signals || []).length
+      ? "A few minor signals came up, but none of them was strong enough to raise the risk."
+      : "Telltale’s detectors look for look-alike links, payment demands, requests for codes or remote access, and pressure to act fast. None of them fired on this message.";
+    sec.append(el("p", { class: "section-lead", text: said }));
     root.append(sec);
   }
+  if (r.coverage_notes && r.coverage_notes.length) {
+    root.append(el("div", { class: "notes" }, el("ul", {}, ...r.coverage_notes.map((c) => el("li", { text: c })))));
+  }
+
+  const folds = [];
+  if (v.reasoning) folds.push(fold("The full read", "", el("div", { class: "how", text: v.reasoning })));
 
   if (r.archetype && r.archetype.archetype_id !== "none" && r.archetype_how) {
-    const sec = section("How this con usually works");
     const how = el("div", { class: "how" }, el("div", { class: "name", text: r.archetype.name }), el("div", { text: r.archetype_how }));
     if (r.archetype_refs && r.archetype_refs.length) {
       const refs = el("div", { class: "refs" }, "Basis ");
-      r.archetype_refs.forEach((x, i) => refs.append(i ? ", " : "", link(x.url, x.name)));
+      r.archetype_refs.forEach((x, i) => refs.append(i ? ", " : "", srcLink(x.url, x.name)));
       how.append(refs);
     }
-    sec.append(how);
-    root.append(sec);
+    folds.push(fold("How this con usually works", "", how));
   }
 
   if (r.sources && r.sources.length) {
-    const sec = section("Live research, via Tavily");
-    for (const s of r.sources) {
+    const list = r.sources.map((s) => {
       const about = s.mentions && s.mentions.length ? `Mentions ${s.mentions.join(", ")}` : "About the scam pattern in general";
-      sec.append(el("div", { class: "source" }, el("div", {}, link(s.url, s.title)), el("div", { class: "s-about", text: about }), el("div", { class: "s-snip", text: s.snippet })));
-    }
-    root.append(sec);
+      return el("div", { class: "source" }, srcLink(s.url, s.title), el("div", { class: "s-about", text: about }), el("div", { class: "s-snip", text: s.snippet }));
+    });
+    folds.push(fold("Live research, via Tavily", plural(r.sources.length, "source"), ...list));
   }
 
   const notProven = r.not_proven || [];
   if (notProven.length || (ap.how_to_verify && ap.how_to_verify.length)) {
-    const sec = section("What isn’t proven, and what would settle it");
     const cols = el("div", { class: "cols" });
     if (notProven.length) cols.append(listBox("box notproven", "Telltale can’t confirm", notProven));
     if (ap.how_to_verify && ap.how_to_verify.length) cols.append(listBox("box wouldchange", "What would settle it", ap.how_to_verify));
-    sec.append(cols);
-    root.append(sec);
+    folds.push(fold("What isn’t proven, and what would settle it", "", cols));
   }
 
-  if (ap.report_to && ap.report_to.length) {
-    const sec = section("Where to report");
-    for (const c of ap.report_to) {
-      const card = el("div", { class: "report" }, el("div", { class: "r-name", text: c.region && c.region !== "Global" ? `${c.name} (${c.region})` : c.name }));
-      const meta = el("div", { class: "r-meta" });
-      if (c.phone) meta.append(`Phone ${c.phone}`);
-      if (c.url) meta.append(c.phone ? "   " : "", link(c.url, c.url));
-      if (c.phone || c.url) card.append(meta);
-      if (c.note) card.append(el("div", { class: "r-note", text: c.note }));
-      sec.append(card);
-    }
-    root.append(sec);
-  }
-
-  if (ap.safe_reply) {
-    const sec = section("A safe reply you could send");
-    const ta = el("textarea");
-    ta.value = ap.safe_reply;
-    ta.readOnly = true;
-    const btn = el("button", { class: "btn copy", text: "Copy" });
-    btn.onclick = async () => {
-      try {
-        await navigator.clipboard.writeText(ap.safe_reply);
-        btn.textContent = "Copied";
-      } catch {
-        ta.select();
-        btn.textContent = "Select and copy";
-      }
-      setTimeout(() => (btn.textContent = "Copy"), 1500);
-    };
-    sec.append(el("div", { class: "reply" }, ta, btn));
-    root.append(sec);
-  }
+  if (channels.length && !serious) folds.push(fold("Where to report a scam", plural(channels.length, "place"), reportList(channels)));
 
   const en = r.entities || {};
   const picked = [["link", en.domains], ["email", en.emails], ["phone", en.phones], ["UPI", en.upi_ids], ["wallet", en.crypto_addresses], ["amount", en.amounts]];
   const entChips = picked.flatMap(([label, arr]) => (arr || []).map((x) => el("span", { class: "entity" }, el("b", { text: label }), x)));
-  if (entChips.length) {
-    const sec = section("What we picked out");
-    sec.append(el("div", { class: "entities" }, ...entChips));
-    root.append(sec);
+  if (entChips.length) folds.push(fold("What Telltale picked out of the message", plural(entChips.length, "item"), el("div", { class: "entities" }, ...entChips)));
+
+  const trace = runTrace(r);
+  if (trace) folds.push(trace);
+
+  if (folds.length) {
+    root.append(
+      el(
+        "div",
+        { class: "more" },
+        el("h3", { text: "How Telltale got here" }),
+        el("p", { class: "section-lead", text: "The reasoning, the sources it checked, and what each model call cost. Open any line." }),
+        ...folds,
+      ),
+    );
   }
 
-  if (r.coverage_notes && r.coverage_notes.length) {
-    root.append(el("div", { class: "notes" }, el("div", { text: "Notes on this analysis" }), el("ul", {}, ...r.coverage_notes.map((c) => el("li", { text: c })))));
-  }
-  const trace = runTrace(r);
-  if (trace) root.append(trace);
   root.append(el("div", { class: "disclaimer", text: r.disclaimer || "" }));
   root.scrollIntoView({ behavior: "smooth", block: "start" });
 }
 
-function tellsSection(r, color) {
+function verdictBlock(v, risk) {
+  const score = Math.max(0, Math.min(100, Math.round(Number(v.score) || 0)));
+  let active = BANDS[0][0];
+  for (const [name, from] of BANDS) if (score >= from) active = name;
+  const track = el("div", { class: "v-track" }, ...BANDS.map(([name]) => el("span", { class: `band b-${name}${name === active ? " on" : ""}` })));
+  const mark = el("span", { class: "v-mark" }, el("span", { text: String(score) }));
+  mark.style.setProperty("--pos", score + "%");
+  track.append(mark);
+  const ticks = el("div", { class: "v-ticks", attrs: { "aria-hidden": "true" } }, ...["0", "15", "35", "60", "80", "100"].map((t) => el("span", { text: t })));
+  const scale = el(
+    "div",
+    { class: "v-scale", attrs: { role: "img", "aria-label": `Risk score ${score} out of 100` } },
+    el("div", { class: "v-cap", attrs: { "aria-hidden": "true" }, text: "Risk score out of 100" }),
+    track,
+    ticks,
+  );
+  return el("div", { class: "verdict " + risk.cls }, el("div", { class: "v-stamp", text: risk.label }), el("h2", { class: "v-headline", text: v.headline }), scale);
+}
+
+function reportList(channels) {
+  const box = el("div", { class: "reports" });
+  for (const c of channels) {
+    const row = el("div", { class: "report" }, el("div", { class: "r-name", text: c.region && c.region !== "Global" ? `${c.name} (${c.region})` : c.name }));
+    if (c.phone || c.url) {
+      const meta = el("div", { class: "r-meta" });
+      if (c.phone) meta.append(el("span", {}, "Call ", telLink(c.phone)));
+      if (c.url) meta.append(link(c.url, hostOf(c.url) || c.url));
+      row.append(meta);
+    }
+    if (c.note) row.append(el("div", { class: "r-note", text: c.note }));
+    box.append(row);
+  }
+  return box;
+}
+
+function safeReply(text) {
+  const sec = section("A safe reply you could send");
+  const ta = el("textarea", { attrs: { "aria-label": "Suggested reply" } });
+  ta.value = text;
+  ta.readOnly = true;
+  const btn = el("button", { class: "btn copy", text: "Copy" });
+  btn.onclick = async () => {
+    try {
+      await navigator.clipboard.writeText(text);
+      btn.textContent = "Copied";
+    } catch {
+      ta.select();
+      btn.textContent = "Select and copy";
+    }
+    setTimeout(() => (btn.textContent = "Copy"), 1500);
+  };
+  sec.append(el("div", { class: "reply" }, ta, btn));
+  return sec;
+}
+
+function tellsSection(r, riskCls) {
   const sources = Object.fromEntries((r.sources || []).map((s) => [s.id, s]));
   const signals = Object.fromEntries((r.signals || []).map((s) => [s.id, s]));
   const sec = section("The tells");
+  sec.classList.add(riskCls);
+  const list = el("ol", { class: "findings" });
   for (const t of r.verdict.tells) {
-    const card = el("div", { class: "tell" }, el("div", { class: "t-title", text: t.title }), el("div", { class: "t-exp", text: t.explanation }));
-    card.style.setProperty("--rc", color);
+    const item = el("li", { class: "tell" }, el("div", { class: "t-title", text: t.title }), el("div", { class: "t-exp", text: t.explanation }));
     if (t.evidence_type === "quote" && t.quote) {
-      card.append(el("div", { class: "quote", text: `“${t.quote}”` }), el("div", { class: "badge", text: "from the message" }));
+      item.append(el("blockquote", { class: "quote", text: `“${t.quote}”` }), el("div", { class: "t-ev" }, el("span", { class: "badge", text: "From the message" })));
     } else if (t.evidence_type === "source") {
       const src = sources[t.evidence_ref];
-      if (t.support) card.append(el("div", { class: "quote", text: `“${t.support}”` }));
-      if (src) card.append(el("div", { class: "t-src" }, "Source ", link(src.url, src.title)));
-      card.append(el("div", { class: "badge", text: "live source" }));
+      if (t.support) item.append(el("blockquote", { class: "quote", text: `“${t.support}”` }));
+      item.append(el("div", { class: "t-ev" }, el("span", { class: "badge", text: "Live source via Tavily" }), src ? srcLink(src.url, src.title) : null));
     } else {
       const sig = signals[t.evidence_ref];
-      if (sig) card.append(el("div", { class: "t-src", text: sig.evidence_text ? `Detector found ${sig.evidence_text}` : `Detector ${sig.label}` }));
-      card.append(el("div", { class: "badge", text: "detected signal" }));
+      const found = sig ? (sig.evidence_text ? `Matched “${sig.evidence_text}”` : sig.label) : null;
+      item.append(el("div", { class: "t-ev" }, el("span", { class: "badge", text: "Detected signal" }), found ? el("span", { text: found }) : null));
     }
-    sec.append(card);
+    list.append(item);
   }
+  sec.append(list);
   return sec;
 }
 
@@ -407,12 +519,19 @@ function tellsSection(r, color) {
 function evidenceCheck(audit, rejected) {
   const sec = section("Evidence check");
   sec.classList.add("evcheck");
+  const row = (label, n, cls) => el("div", { class: "row " + cls }, el("dt", { text: label }), el("dd", { text: String(n) }));
   sec.append(
-    el("div", {
+    el("p", {
       class: "ev-lead",
       text: "Every finding has to point at something checkable, such as a detector signal, a passage from a live source, or the message’s own words. Here is how this analysis held up.",
     }),
-    el("div", { class: "ev-stats" }, evStat(audit.proposed, "proposed", "neutral"), evStat(audit.kept, "backed by evidence", "ok"), evStat(audit.rejected, "rejected", audit.rejected > 0 ? "bad" : "muted")),
+    el(
+      "dl",
+      { class: "ledger" },
+      row("Proposed by the model", audit.proposed, ""),
+      row("Backed by evidence", audit.kept, "ok"),
+      row("Rejected", audit.rejected, audit.rejected > 0 ? "bad" : "zero"),
+    ),
   );
   if (rejected.length) {
     const box = el("div", { class: "ev-rejects" }, el("div", { class: "ev-rejects-h", text: "The model proposed these, but the evidence couldn’t back them, so they were dropped." }));
@@ -422,7 +541,7 @@ function evidenceCheck(audit, rejected) {
           "div",
           { class: "ev-claim" },
           el("div", { class: "ev-claim-src", text: "Nemotron proposed" }),
-          el("div", { class: "ev-claim-top" }, el("span", { class: "ev-claim-title", text: claim.title || "Untitled claim" }), el("span", { class: "ev-claim-badge", text: "✗ rejected" })),
+          el("div", { class: "ev-claim-top" }, el("span", { class: "ev-claim-title", text: claim.title || "Untitled claim" }), el("span", { class: "ev-claim-badge", text: "Rejected" })),
           el("div", { class: "ev-claim-reason", text: `Dropped because it ${claim.reason}.` }),
         ),
       );
@@ -441,7 +560,7 @@ function runTrace(r) {
   const calls = rows.filter((x) => x.kind === "model");
   const searches = rows.length - calls.length;
   const tokens = calls.reduce((a, x) => a + x.tokens_in + x.tokens_out, 0);
-  const summary = `How this run worked. ${calls.length} model call${calls.length === 1 ? "" : "s"}, ${searches} live search${searches === 1 ? "" : "es"}, ${fmtMs(r.duration_ms || 0)} in total`;
+  const count = `${plural(calls.length, "model call")}, ${plural(searches, "live search", "live searches")}, ${fmtMs(r.duration_ms || 0)}`;
   const head = el("tr", {}, ...["Step", "Model or tool", "Mode", "Time", "Tokens in / out"].map((h) => el("th", { text: h })));
   const body = rows.map((x) =>
     el(
@@ -454,38 +573,18 @@ function runTrace(r) {
       el("td", { class: "num", text: x.kind === "model" ? `${x.tokens_in} / ${x.tokens_out}` : "" }),
     ),
   );
-  return el(
-    "details",
-    { class: "trace" },
-    el("summary", { text: summary }),
+  const d = fold(
+    "How this run worked",
+    count,
     el("div", { class: "trace-wrap" }, el("table", {}, el("thead", {}, head), el("tbody", {}, ...body))),
     el("div", { class: "trace-note", text: `${tokens.toLocaleString()} tokens across all model calls. Reasoning runs only on the verdict step.` }),
   );
+  d.classList.add("trace");
+  return d;
 }
 
 function listBox(cls, heading, items) {
   return el("div", { class: cls }, el("h4", { text: heading }), el("ul", {}, ...items.map((s) => el("li", { text: s }))));
-}
-
-function evStat(n, label, kind) {
-  return el("div", { class: "ev-stat " + kind }, el("div", { class: "ev-num", text: String(n) }), el("div", { class: "ev-lbl", text: label }));
-}
-
-function gauge(score, color) {
-  const NS = "http://www.w3.org/2000/svg";
-  const r = 40;
-  const c = 2 * Math.PI * r;
-  const svg = document.createElementNS(NS, "svg");
-  svg.setAttribute("viewBox", "0 0 92 92");
-  svg.setAttribute("class", "g");
-  const ring = (stroke, extra = {}) => {
-    const n = document.createElementNS(NS, "circle");
-    for (const [k, v] of Object.entries({ cx: 46, cy: 46, r, fill: "none", stroke, "stroke-width": 8, ...extra })) n.setAttribute(k, v);
-    return n;
-  };
-  const off = c * (1 - Math.max(0, Math.min(100, score)) / 100);
-  svg.append(ring("#22304a"), ring(color, { "stroke-linecap": "round", "stroke-dasharray": c, "stroke-dashoffset": off, transform: "rotate(-90 46 46)" }));
-  return el("div", { class: "gauge" }, svg, el("div", { class: "num", text: String(score) }));
 }
 
 function section(title) {
