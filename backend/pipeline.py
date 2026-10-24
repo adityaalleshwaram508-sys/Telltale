@@ -329,12 +329,7 @@ async def analyze(
     if model_on:
         try:
             context = await ask(MessageContext, context_system(), context_user(text), "context")
-            yield _event(
-                "context",
-                "done",
-                _context_line(context),
-                context=context.model_dump(),
-            )
+            yield _event("context", "done", _context_line(context), context=context.model_dump())
         except LLMError as exc:
             degraded = True
             context = _heuristic_context(text, entities)
