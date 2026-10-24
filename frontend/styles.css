@@ -443,9 +443,12 @@ details.fold > summary:hover > span:first-of-type { text-decoration: underline; 
 .entities { display: flex; flex-wrap: wrap; gap: 4px 18px; font-family: var(--mono); font-size: 0.86rem; }
 .entity b { margin-right: 6px; font-weight: 400; color: var(--muted); }
 
+/* the run trace is the receipt, so it gets the full width and must fit without scrolling on a laptop */
+.trace .fold-body { padding-left: 0; }
 .trace-wrap { overflow-x: auto; }
-.trace table { width: 100%; border-collapse: collapse; font-family: var(--mono); font-size: 0.78rem; }
-.trace th, .trace td { text-align: left; padding: 6px 12px 6px 0; border-bottom: 1px solid var(--rule); white-space: nowrap; }
+.trace table { width: 100%; border-collapse: collapse; font-family: var(--mono); font-size: 0.74rem; }
+.trace th, .trace td { text-align: left; padding: 6px 10px 6px 0; border-bottom: 1px solid var(--rule); white-space: nowrap; }
+.trace th:last-child, .trace td:last-child { padding-right: 0; }
 .trace th { color: var(--muted); font-weight: 500; }
 .trace td.num { text-align: right; font-variant-numeric: tabular-nums; }
 .trace tr.fail td { color: var(--high); }
