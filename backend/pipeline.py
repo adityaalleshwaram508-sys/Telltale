@@ -93,6 +93,38 @@ def _event(step: str, status: str, message: str, **data) -> StepEvent:
     return StepEvent(step=step, status=status, message=message, data=data or None)
 
 
+# The step lines are the only part of the run a worried person reads while they wait, so they
+# are written as sentences rather than as a dump of the enum the model handed back.
+_CHANNEL_LABEL = {
+    "sms": "a text message",
+    "email": "an email",
+    "whatsapp": "a WhatsApp message",
+    "call_transcript": "a phone call",
+    "website": "a web page",
+    "social_dm": "a direct message",
+}
+# a message arrives "from" a sender, but a web page only "claims to be" one
+_CHANNEL_LINK = {"website": "claiming to be"}
+
+
+def _named(value: str | None) -> str | None:
+    """The sender, unless the model gave up and said so."""
+    value = (value or "").strip()
+    return None if value.lower() in {"", "unknown", "unknown sender", "a person", "none"} else value
+
+
+def _context_line(context: MessageContext) -> str:
+    kind = _CHANNEL_LABEL.get(context.channel)
+    who = _named(context.claimed_sender)
+    if kind and who:
+        return f"Looks like {kind} {_CHANNEL_LINK.get(context.channel, 'from')} {who}."
+    if kind:
+        return f"Looks like {kind}, and it doesn't name a sender."
+    if who:
+        return f"It says it is from {who}."
+    return "It doesn't say who it is from."
+
+
 def _infer_region(entities: Entities, text: str, hint: str | None) -> str | None:
     if hint:
         return hint.upper()
@@ -285,7 +317,9 @@ async def analyze(
     yield _event(
         "detect",
         "done",
-        f"Found {len(signals)} concrete signal(s).",
+        f"Found {len(signals)} concrete signal{'' if len(signals) == 1 else 's'}."
+        if signals
+        else "No hard signals in the message itself.",
         signals=len(signals),
         entities=entities.model_dump(),
     )
@@ -298,7 +332,7 @@ async def analyze(
             yield _event(
                 "context",
                 "done",
-                f"Looks like a {context.channel} from {context.claimed_sender}.",
+                _context_line(context),
                 context=context.model_dump(),
             )
         except LLMError as exc:
@@ -347,7 +381,9 @@ async def analyze(
     yield _event(
         "research",
         "done",
-        f"{len(sources)} live source(s) found." if sources else "No live reports found.",
+        f"{len(sources)} live source{'' if len(sources) == 1 else 's'} found."
+        if sources
+        else "No live reports found.",
         sources=[s.model_dump() for s in sources],
         queries=research.queries,
     )

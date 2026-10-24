@@ -366,7 +366,7 @@ function renderResult(r) {
     root.append(evidenceCheck(r.evidence_audit, r.rejected_claims || []));
   }
   if (v.tells && v.tells.length) {
-    root.append(tellsSection(r, risk.cls));
+    root.append(tellsSection(r, risk.cls, serious));
   } else if (!serious) {
     const sec = section("Why it’s rated low");
     const said = (r.signals || []).length
@@ -489,11 +489,16 @@ function safeReply(text) {
   return sec;
 }
 
-function tellsSection(r, riskCls) {
+function tellsSection(r, riskCls, serious) {
   const sources = Object.fromEntries((r.sources || []).map((s) => [s.id, s]));
   const signals = Object.fromEntries((r.signals || []).map((s) => [s.id, s]));
-  const sec = section("The tells");
+  // A "tell" is a warning sign. On a message that came back clean these are the things the
+  // read turned up, not strikes against it, so the heading has to say which one you're reading.
+  const sec = section(serious ? "The tells" : "What the read turned up");
   sec.classList.add(riskCls);
+  if (!serious) {
+    sec.append(el("p", { class: "section-lead", text: "None of these is a warning sign. They are what Telltale found when it read the message, and what each one rests on." }));
+  }
   const list = el("ol", { class: "findings" });
   for (const t of r.verdict.tells) {
     const item = el("li", { class: "tell" }, el("div", { class: "t-title", text: t.title }), el("div", { class: "t-exp", text: t.explanation }));
