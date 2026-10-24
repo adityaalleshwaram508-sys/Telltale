@@ -187,6 +187,35 @@ def test_this_domain_needs_an_on_topic_source():
     assert _codes([_source("src2", "link to a copycat site", **claim)]) == ["source_off_topic"]
 
 
+def test_the_domain_is_as_specific_as_this_domain():
+    """A live judge review caught this one.
+
+    A tell said live research labelled "the domain" as a known scam, cited a source that only
+    described the scam pattern, and was kept, because only "this domain" was treated as
+    pointing at the message's own link. A definite article is just as specific here.
+    """
+    claim = dict(
+        title="Source confirmation",
+        explanation="live research labels the domain as part of a known fake parcel scam",
+    )
+    assert _codes([_source("src2", "link to a copycat site", **claim)]) == ["source_off_topic"]
+    # The same claim about the actual domain is backed by the source that names it.
+    assert _codes([_source("src1", "reported indiapost-redelivery.top as a fake", **claim)]) == []
+
+
+def test_a_general_claim_about_links_is_still_general():
+    """The fix must not swallow nouns that read generally.
+
+    "The link in a text" is a statement about how this con works, not about this message's
+    link, so a pattern-level source is the right evidence for it and it has to survive.
+    """
+    claim = dict(
+        title="How the con works",
+        explanation="texts like this one put the link in a text message instead of an app",
+    )
+    assert _codes([_source("src2", "link to a copycat site", **claim)]) == []
+
+
 def test_signal_cannot_back_outside_confirmation():
     tell = Tell(
         title="Government has confirmed this website is fraudulent",

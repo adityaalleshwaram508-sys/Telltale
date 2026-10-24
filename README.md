@@ -58,7 +58,7 @@ action plan, and regional reporting channels. Before any of that, it shows an
 backed, and any it rejected — with the reason each rejected claim was dropped.
 
 ```bash
-python -m pytest -q          # 120 unit tests
+python -m pytest -q          # 122 unit tests
 python eval/detection.py     # detection metrics (no API key needed)
 python eval/grounding.py     # Evidence Integrity Benchmark (no API key needed)
 ```

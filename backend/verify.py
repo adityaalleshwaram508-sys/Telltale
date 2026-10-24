@@ -60,6 +60,11 @@ _DEICTIC = re.compile(
     r"\b(?:this|that|the same) (?:exact |specific |particular )?"
     r"(?:domain|link|url|website|site|web address|number|phone number|mobile number"
     r"|upi(?: id| handle)?|account|wallet|address|email(?: address)?|sender id)\b"
+    # "the domain" points at the message's own link exactly as "this domain" does, so a
+    # pattern-level source cannot back it. Only nouns with no readable general sense are
+    # listed: "the link in a text" and "the address correction fee" are still general claims,
+    # which is why "link" and "address" are deliberately absent here.
+    r"|\bthe (?:domain|phone number|mobile number|upi(?: id| handle)?|sender id)\b"
 )
 
 REASONS = {
